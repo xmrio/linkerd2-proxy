@@ -205,7 +205,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
-                .push_per_service(svc::lock::Layer::<DiscoveryError>::new())
+                .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
 
@@ -284,7 +284,7 @@ impl<A: OrigDstAddr> Config<A> {
                     },
                 ))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::<DiscoveryError>::new())
+                .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|_: &Profile| info_span!("profile"))
                 .check_service::<Profile>()
