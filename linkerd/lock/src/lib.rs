@@ -110,7 +110,7 @@ where
                     };
                 }
 
-                // If an error occured above,the locked state is dropped and
+                // If an error occured above, the locked state is dropped and
                 // cannot be acquired again.
                 unreachable!("must not lock on error");
             }

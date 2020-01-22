@@ -110,7 +110,7 @@ where
                     Err(e) => {
                         // If the service fails, try to recover.
                         let error: Error = e.into();
-                        tracing::warn!(message="Service failed", %error);
+                        tracing::debug!(message="Service failed", %error);
                         State::Recover {
                             error: Some(error),
                             backoff: None,
