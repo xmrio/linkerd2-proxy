@@ -4,12 +4,12 @@ use futures::{
     try_ready, Async, Future, Poll,
 };
 use linkerd2_app_core::{
-    errors,
     proxy::http::identity_from_header,
     svc,
     transport::tls::{self, HasPeerIdentity},
     Conditional, Error, L5D_REQUIRE_ID,
 };
+use linkerd2_identity as identity;
 use tracing::debug;
 
 #[derive(Clone, Debug)]
@@ -29,6 +29,12 @@ pub struct MakeFuture<F> {
 pub struct RequireIdentity<M> {
     peer_identity: tls::PeerIdentity,
     inner: M,
+}
+
+#[derive(Clone, Debug)]
+pub struct IdentityRequirementError {
+    required: identity::Name,
+    found: Option<identity::Name>,
 }
 
 // ===== impl Layer =====
@@ -144,23 +150,17 @@ where
             match self.peer_identity {
                 Conditional::Some(ref peer_identity) => {
                     if require_identity != *peer_identity {
-                        let message = format!(
-                            "require identity check failed; require={:?} found={:?}",
-                            require_identity, peer_identity
-                        );
-                        let e = errors::StatusError {
-                            message,
-                            status: http::StatusCode::FORBIDDEN,
+                        let e = IdentityRequirementError {
+                            required: require_identity,
+                            found: Some(peer_identity.clone()),
                         };
                         return Either::A(future::err(e.into()));
                     }
                 }
                 Conditional::None(_) => {
-                    let message =
-                        "require identity check failed; no peer_identity found".to_string();
-                    let e = errors::StatusError {
-                        message,
-                        status: http::StatusCode::FORBIDDEN,
+                    let e = IdentityRequirementError {
+                        required: require_identity,
+                        found: None,
                     };
                     return Either::A(future::err(e.into()));
                 }
@@ -170,3 +170,14 @@ where
         Either::B(self.inner.call(request).map_err(Into::into))
     }
 }
+
+impl std::fmt::Display for IdentityRequirementError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.found {
+            Some(ref found) => write!(f, "request required the identity '{}' but '{}' discovered", self.required, found),
+            None => write!(f, "request required the identity '{}' but no identity discovered", self.required),
+        }
+    }
+}
+
+impl std::error::Error for IdentityRequirementError {}

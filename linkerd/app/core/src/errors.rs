@@ -5,7 +5,7 @@ use futures::{Future, Poll};
 use http::{header, Request, Response, StatusCode, Version};
 use linkerd2_error::Error;
 use linkerd2_proxy_http::HasH2Reason;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 /// Layer to map HTTP service errors into appropriate `http::Response`s.
 #[derive(Clone, Debug)]
@@ -20,10 +20,10 @@ pub struct ResponseFuture<F> {
     is_http2: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct StatusError {
-    pub status: http::StatusCode,
-    pub message: String,
+    pub code: http::StatusCode,
+    pub error: Error,
 }
 
 impl<S> svc::Layer<S> for Layer {
@@ -89,33 +89,34 @@ where
     }
 }
 
-fn map_err_to_5xx(e: Error) -> StatusCode {
+fn map_err_to_5xx(error: Error) -> StatusCode {
     use linkerd2_cache::error as cache;
     use tower::load_shed::error as shed;
 
-    if let Some(ref c) = e.downcast_ref::<cache::NoCapacity>() {
-        warn!("service cache at capacity ({})", c.0);
+    let status = if error.is::<cache::NoCapacity>() {
         http::StatusCode::SERVICE_UNAVAILABLE
-    } else if let Some(_) = e.downcast_ref::<shed::Overloaded>() {
-        warn!("server overloaded, max-in-flight reached");
+    } else if error.is::<shed::Overloaded>() {
         http::StatusCode::SERVICE_UNAVAILABLE
-    } else if e.is::<tower::timeout::error::Elapsed>() {
-        warn!("failed to acquire a client");
+    } else if error.is::<tower::timeout::error::Elapsed>() {
         http::StatusCode::SERVICE_UNAVAILABLE
-    } else if let Some(err) = e.downcast_ref::<StatusError>() {
-        error!(%err.status, %err.message);
-        err.status
+    } else if let Some(StatusError { code, .. }) = error.downcast_ref() {
+        *code
     } else {
-        // we probably should have handled this before?
-        error!("unexpected error: {:?}", e);
         http::StatusCode::BAD_GATEWAY
-    }
+    };
+
+    warn!(%status, "Failed to proxy request: {}", error);
+    status
 }
 
 impl std::fmt::Display for StatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.message.fmt(f)
+        self.error.fmt(f)
     }
 }
 
-impl std::error::Error for StatusError {}
+impl std::error::Error for StatusError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
+}
