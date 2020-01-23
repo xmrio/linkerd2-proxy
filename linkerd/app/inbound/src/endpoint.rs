@@ -1,13 +1,12 @@
 use indexmap::IndexMap;
 use linkerd2_app_core::{
     classify, dst, http_request_authority_addr, http_request_host_addr,
-    http_request_l5d_override_dst_addr, metric_labels,
+    http_request_l5d_override_dst_addr, metric_labels, profiles,
     proxy::{http, identity, tap},
     router, trace,
     transport::{connect, tls},
     Addr, Conditional, NameAddr, CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER,
 };
-use linkerd2_service_profiles as profiles;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -117,7 +116,7 @@ impl profiles::HasDestination for Profile {
     }
 }
 
-impl linkerd2_service_profiles::WithRoute for Profile {
+impl profiles::WithRoute for Profile {
     type Route = dst::Route;
 
     fn with_route(self, route: profiles::Route) -> Self::Route {

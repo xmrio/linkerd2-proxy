@@ -15,6 +15,7 @@ use linkerd2_app_core::{
     config::{ProxyConfig, ServerConfig},
     dns, drain, dst, errors,
     opencensus::proto::trace::v1 as oc,
+    profiles,
     proxy::{
         self, core::resolve::Resolve, discover, fallback, http, identity, resolve::map_endpoint,
         tap, tcp, Server,
@@ -27,7 +28,6 @@ use linkerd2_app_core::{
     Conditional, DiscoveryRejected, Error, ProxyMetrics, CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER,
     L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID, L5D_SERVER_ID,
 };
-use linkerd2_service_profiles as profiles;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;

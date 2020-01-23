@@ -174,8 +174,16 @@ where
 impl std::fmt::Display for IdentityRequirementError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.found {
-            Some(ref found) => write!(f, "request required the identity '{}' but '{}' discovered", self.required, found),
-            None => write!(f, "request required the identity '{}' but no identity discovered", self.required),
+            Some(ref found) => write!(
+                f,
+                "request required the identity '{}' but '{}' discovered",
+                self.required, found
+            ),
+            None => write!(
+                f,
+                "request required the identity '{}' but no identity discovered",
+                self.required
+            ),
         }
     }
 }

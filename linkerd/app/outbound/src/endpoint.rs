@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use linkerd2_app_core::{
     dst, metric_labels,
     metric_labels::{prefix_labels, EndpointLabels},
+    profiles,
     proxy::{
         api_resolve::{Metadata, ProtocolHint},
         http::{self, identity_from_header},
@@ -13,7 +14,6 @@ use linkerd2_app_core::{
     transport::{connect, tls},
     Addr, Conditional, L5D_REQUIRE_ID,
 };
-use linkerd2_service_profiles as profiles;
 use std::net::SocketAddr;
 use std::sync::Arc;
 

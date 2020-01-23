@@ -14,6 +14,7 @@ use linkerd2_app_core::{
     config::{ProxyConfig, ServerConfig},
     drain, dst, errors,
     opencensus::proto::trace::v1 as oc,
+    profiles,
     proxy::{
         self, fallback,
         http::{client, normalize_uri, orig_proto, strip_header},
@@ -28,7 +29,6 @@ use linkerd2_app_core::{
     transport::{self, connect, io::BoxedIo, tls, OrigDstAddr, SysOrigDstAddr},
     Error, ProxyMetrics, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_SERVER_ID,
 };
-use linkerd2_service_profiles as profiles;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
