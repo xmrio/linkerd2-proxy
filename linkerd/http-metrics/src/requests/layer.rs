@@ -12,7 +12,6 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio_timer::clock;
-use tracing::trace;
 
 /// A stack module that wraps services to record metrics.
 #[derive(Debug)]
@@ -36,16 +35,6 @@ where
 {
     registry: SharedRegistry<K, C::Class>,
     inner: M,
-    _p: PhantomData<fn() -> C>,
-}
-
-pub struct MakeFuture<F, C>
-where
-    C: ClassifyResponse,
-    C::Class: Hash + Eq,
-{
-    metrics: Option<Arc<Mutex<Metrics<C::Class>>>>,
-    inner: F,
     _p: PhantomData<fn() -> C>,
 }
 
@@ -203,14 +192,13 @@ where
 {
     type Response = Service<M::Response, C>;
     type Error = M::Error;
-    type Future = MakeFuture<M::Future, C>;
+    type Future = Service<M::Future, C>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         self.inner.poll_ready()
     }
 
     fn call(&mut self, target: T) -> Self::Future {
-        trace!("make: target={:?}", target);
         let metrics = match self.registry.lock() {
             Ok(mut r) => Some(
                 r.by_target
@@ -220,24 +208,21 @@ where
             ),
             Err(_) => None,
         };
-        trace!("make: metrics={}", metrics.is_some());
 
         let inner = self.inner.call(target);
 
-        MakeFuture {
-            metrics,
+        Self::Future {
             inner,
+            metrics,
             _p: PhantomData,
         }
     }
 }
 
-// === impl MakeFuture ===
-
-impl<C, F> Future for MakeFuture<F, C>
+impl<F, C> Future for Service<F, C>
 where
     F: Future,
-    C: ClassifyResponse + Send + Sync + 'static,
+    C: ClassifyResponse + Default + Send + Sync + 'static,
     C::Class: Hash + Eq,
 {
     type Item = Service<F::Item, C>;
@@ -245,12 +230,12 @@ where
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let inner = try_ready!(self.inner.poll());
-        Ok(Service {
+        let service = Service {
             inner,
             metrics: self.metrics.clone(),
-            _p: PhantomData,
-        }
-        .into())
+            _p: self._p,
+        };
+        Ok(service.into())
     }
 }
 

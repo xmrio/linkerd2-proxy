@@ -13,13 +13,6 @@ pub struct Route {
     pub direction: super::metric_labels::Direction,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Retryability {
-    Exhausted,
-    NotRetryable,
-    Retryable,
-}
-
 // === impl Route ===
 
 impl CanClassify for Route {
