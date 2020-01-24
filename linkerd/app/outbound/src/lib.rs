@@ -173,7 +173,7 @@ impl<A: OrigDstAddr> Config<A> {
                     .push(orig_proto_upgrade::layer())
                     .check_service::<Target<HttpEndpoint>>()
                     .push_trace(|endpoint: &Target<HttpEndpoint>| {
-                        info_span!("endpoint", peer.addr = %endpoint.inner.addr, peer.id = ?endpoint.inner.identity)
+                        info_span!("endpoint", peer.addr = %endpoint.inner.addr)
                     })
             };
 

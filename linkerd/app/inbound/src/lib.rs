@@ -246,7 +246,6 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_trace(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
-                        peer.id = ?src.peer_identity,
                         target.addr = %src.addrs.target_addr(),
                     )
                 });
