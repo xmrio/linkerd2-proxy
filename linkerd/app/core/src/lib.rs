@@ -86,6 +86,8 @@ pub type HttpRouteMetrics = http_metrics::Requests<metric_labels::RouteLabels, c
 
 pub type HttpRouteRetry = http_metrics::Retries<metric_labels::RouteLabels>;
 
+pub type StackMetrics = stack_metrics::NewLayer<metric_labels::StackLabels>;
+
 #[derive(Clone)]
 pub struct ProxyMetrics {
     pub http_handle_time: handle_time::Scope,
@@ -93,7 +95,7 @@ pub struct ProxyMetrics {
     pub http_route_actual: HttpRouteMetrics,
     pub http_route_retry: HttpRouteRetry,
     pub http_endpoint: HttpEndpointMetrics,
-    pub stack: stack_metrics::NewLayer,
+    pub stack: StackMetrics,
     pub transport: transport::Metrics,
 }
 

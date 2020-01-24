@@ -22,6 +22,12 @@ pub struct EndpointLabels {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StackLabels {
+    pub direction: Direction,
+    pub name: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RouteLabels {
     direction: Direction,
     target: Addr,
@@ -172,4 +178,29 @@ where
         write!(out, ",{}_{}=\"{}\"", prefix, k, v).expect("label concat must succeed");
     }
     Some(out)
+}
+
+// === impl StackLabels ===
+
+impl StackLabels {
+    pub fn inbound(name: &'static str) -> Self {
+        Self {
+            direction: Direction::In,
+            name,
+        }
+    }
+
+    pub fn outbound(name: &'static str) -> Self {
+        Self {
+            direction: Direction::Out,
+            name,
+        }
+    }
+}
+
+impl FmtLabels for StackLabels {
+    fn fmt_labels(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.direction.fmt_labels(f)?;
+        write!(f, ",name=\"{}\"", self.name)
+    }
 }

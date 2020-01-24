@@ -12,7 +12,7 @@ use futures::future;
 use linkerd2_app_core::{
     classify,
     config::{ProxyConfig, ServerConfig},
-    drain, dst, errors,
+    drain, dst, errors, metric_labels,
     opencensus::proto::trace::v1 as oc,
     profiles,
     proxy::{
@@ -114,7 +114,7 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push(metrics.stack.new_layer("endpoint"))
+                .push(metrics.stack.new_layer(stack_labels("endpoint")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
                 .spawn_cache(cache_capacity, cache_max_idle_age)
@@ -155,7 +155,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // absolute-form on the outbound side.
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
-                .push(metrics.stack.new_layer("target"))
+                .push(metrics.stack.new_layer(stack_labels("target")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
                 .check_new_clone_service::<Target>()
@@ -178,7 +178,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(svc::lock::Layer::default())
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
-                .push(metrics.stack.new_layer("profile"))
+                .push(metrics.stack.new_layer(stack_labels("profile")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|p: &Profile| info_span!("profile", addr = %p.addr()))
                 .check_service::<Profile>()
@@ -242,7 +242,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(http_strip_headers)
                 .push_per_service(http_admit_request)
                 .push_per_service(http_server_observability)
-                .push(metrics.stack.new_layer("source"))
+                .push(metrics.stack.new_layer(stack_labels("source")))
                 .push_trace(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
@@ -271,6 +271,10 @@ impl<A: OrigDstAddr> Config<A> {
 
         Ok(Inbound { listen_addr, serve })
     }
+}
+
+fn stack_labels(name: &'static str) -> metric_labels::StackLabels {
+    metric_labels::StackLabels::inbound(name)
 }
 
 #[derive(Copy, Clone, Debug)]

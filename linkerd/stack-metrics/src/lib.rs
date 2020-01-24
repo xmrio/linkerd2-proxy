@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use linkerd2_metrics::{metrics, Counter, FmtLabels, FmtMetrics};
 use linkerd2_stack::{NewService, Proxy};
 use std::fmt;
+use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
 metrics! {
@@ -15,20 +16,17 @@ metrics! {
     stack_service_drop_total: Counter { "Total number of services dropped" }
 }
 
-type Registry = Arc<Mutex<IndexMap<Scope, Arc<Metrics>>>>;
+type Registry<L> = Arc<Mutex<IndexMap<L, Arc<Metrics>>>>;
 
-#[derive(Copy, Clone, Debug, Default, Hash, PartialEq, Eq)]
-struct Scope(&'static str);
-
-#[derive(Clone, Debug, Default)]
-pub struct NewLayer {
-    registry: Registry,
+#[derive(Debug)]
+pub struct NewLayer<L: Hash + Eq> {
+    registry: Registry<L>,
 }
 
 /// Reports metrics for prometheus.
-#[derive(Clone, Debug)]
-pub struct Report {
-    registry: Registry,
+#[derive(Debug)]
+pub struct Report<L: Hash + Eq> {
+    registry: Registry<L>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,20 +58,39 @@ pub struct Service<S> {
     metrics: Arc<Metrics>,
 }
 
-impl NewLayer {
-    pub fn new_layer(&self, name: &'static str) -> Layer {
+impl<L> NewLayer<L>
+where
+    L: Hash + Eq,
+{
+    pub fn new_layer(&self, labels: L) -> Layer {
         let metrics = {
             let mut registry = self.registry.lock().expect("stack metrics lock poisoned");
             registry
-                .entry(Scope(name))
+                .entry(labels.into())
                 .or_insert_with(|| Default::default())
                 .clone()
         };
         Layer { metrics }
     }
 
-    pub fn report(&self) -> Report {
+    pub fn report(&self) -> Report<L> {
         Report {
+            registry: self.registry.clone(),
+        }
+    }
+}
+
+impl<L: Hash + Eq> Default for NewLayer<L> {
+    fn default() -> Self {
+        Self {
+            registry: Registry::default(),
+        }
+    }
+}
+
+impl<L: Hash + Eq> Clone for NewLayer<L> {
+    fn clone(&self) -> Self {
+        Self {
             registry: self.registry.clone(),
         }
     }
@@ -203,7 +220,15 @@ impl<S> Drop for Service<S> {
     }
 }
 
-impl FmtMetrics for Report {
+impl<L: Hash + Eq> Clone for Report<L> {
+    fn clone(&self) -> Self {
+        Self {
+            registry: self.registry.clone(),
+        }
+    }
+}
+
+impl<L: FmtLabels + Hash + Eq> FmtMetrics for Report<L> {
     fn fmt_metrics(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let registry = self.registry.lock().expect("metrics registry poisoned");
         if registry.is_empty() {
@@ -243,11 +268,5 @@ struct Failure;
 impl FmtLabels for Failure {
     fn fmt_labels(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "failure=\"true\"")
-    }
-}
-
-impl FmtLabels for Scope {
-    fn fmt_labels(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "scope=\"{}\"", self.0)
     }
 }
