@@ -401,9 +401,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.1.16"
+version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe67e3678f2827030e89cc4b9e7ecd16d52f132c0b940ab5005f88e821500f6a"
+checksum = "d6ccf5ede3a895d8856620237b2f02972c1bbc78d2965ad7fe8838d4a0ed41f0"
 dependencies = [
  "bytes",
  "fnv",
@@ -1552,10 +1552,8 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d14b1c185652833d24aaad41c5832b0be5616a590227c1fbff57c616754b23"
+source = "git+https://github.com/linkerd/prost?branch=v0.5.x#8875bb9404ed50de20ef51c61bd2eaff5812fb1e"
 dependencies = [
- "byteorder",
  "bytes",
  "prost-derive",
 ]
@@ -1581,8 +1579,7 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e7dc378b94ac374644181a2247cebf59a6ec1c88b49ac77f3a94b86b79d0e11"
+source = "git+https://github.com/linkerd/prost?branch=v0.5.x#8875bb9404ed50de20ef51c61bd2eaff5812fb1e"
 dependencies = [
  "failure",
  "itertools",
