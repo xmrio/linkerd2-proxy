@@ -20,7 +20,7 @@ type Registry = Arc<Mutex<IndexMap<Scope, Arc<Metrics>>>>;
 #[derive(Copy, Clone, Debug, Default, Hash, PartialEq, Eq)]
 struct Scope(&'static str);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NewLayer {
     registry: Registry,
 }

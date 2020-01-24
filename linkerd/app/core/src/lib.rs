@@ -22,6 +22,7 @@ pub use linkerd2_reconnect as reconnect;
 pub use linkerd2_request_filter as request_filter;
 pub use linkerd2_router as router;
 pub use linkerd2_service_profiles as profiles;
+pub use linkerd2_stack_metrics as stack_metrics;
 pub use linkerd2_trace_context as trace_context;
 
 pub mod accept_error;
@@ -92,6 +93,7 @@ pub struct ProxyMetrics {
     pub http_route_actual: HttpRouteMetrics,
     pub http_route_retry: HttpRouteRetry,
     pub http_endpoint: HttpEndpointMetrics,
+    pub stack: stack_metrics::NewLayer,
     pub transport: transport::Metrics,
 }
 

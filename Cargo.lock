@@ -655,6 +655,7 @@ dependencies = [
  "linkerd2-router",
  "linkerd2-service-profiles",
  "linkerd2-stack",
+ "linkerd2-stack-metrics",
  "linkerd2-test-util",
  "linkerd2-timeout",
  "linkerd2-trace-context",
