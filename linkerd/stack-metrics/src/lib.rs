@@ -8,9 +8,7 @@ use std::sync::{Arc, Mutex};
 
 metrics! {
     stack_failure_total: Counter { "Total number stacks failures" },
-    stack_create_total: Counter { "Total number stacks created" },
-    stack_drop_total: Counter { "Total number stacks dropped" },
-    stack_make_total: Counter { "Total number of services made" },
+    stack_make_service_total: Counter { "Total number of services made" },
     stack_service_failure_total: Counter { "Total number of service failures" },
     stack_service_request_total: Counter { "Total number of requests processed by services" },
     stack_service_drop_total: Counter { "Total number of services dropped" }
@@ -36,8 +34,6 @@ pub struct Layer {
 
 #[derive(Debug, Default)]
 struct Metrics {
-    create_total: Counter,
-    drop_total: Counter,
     failure_total: Counter,
     make_success_total: Counter,
     make_failure_total: Counter,
@@ -52,7 +48,7 @@ pub struct Make<S> {
     metrics: Arc<Metrics>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Service<S> {
     inner: S,
     metrics: Arc<Metrics>,
@@ -100,7 +96,6 @@ impl<S> tower::layer::Layer<S> for Layer {
     type Service = Make<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        self.metrics.create_total.incr();
         Self::Service {
             inner,
             metrics: self.metrics.clone(),
@@ -112,10 +107,15 @@ impl<T, S> NewService<T> for Make<S>
 where
     S: NewService<T>,
 {
-    type Service = S::Service;
+    type Service = Service<S::Service>;
 
     fn new_service(&self, target: T) -> Self::Service {
-        self.inner.new_service(target)
+        let inner = self.inner.new_service(target);
+        self.metrics.make_success_total.incr();
+        Self::Service {
+            inner,
+            metrics: self.metrics.clone(),
+        }
     }
 }
 
@@ -142,12 +142,6 @@ where
             inner: self.inner.call(target),
             metrics: self.metrics.clone(),
         }
-    }
-}
-
-impl<S> Drop for Make<S> {
-    fn drop(&mut self) {
-        self.metrics.drop_total.incr();
     }
 }
 
@@ -238,17 +232,13 @@ impl<L: FmtLabels + Hash + Eq> FmtMetrics for Report<L> {
         stack_failure_total.fmt_help(f)?;
         stack_failure_total.fmt_scopes(f, registry.iter(), |m| &m.failure_total)?;
 
-        stack_create_total.fmt_help(f)?;
-        stack_create_total.fmt_scopes(f, registry.iter(), |m| &m.create_total)?;
-
-        stack_drop_total.fmt_help(f)?;
-        stack_drop_total.fmt_scopes(f, registry.iter(), |m| &m.drop_total)?;
-
-        stack_make_total.fmt_help(f)?;
-        stack_make_total.fmt_scopes(f, registry.iter(), |m| &m.make_success_total)?;
-        stack_make_total.fmt_scopes(f, registry.iter().map(|(s, m)| ((s, Failure), m)), |m| {
-            &m.make_failure_total
-        })?;
+        stack_make_service_total.fmt_help(f)?;
+        stack_make_service_total.fmt_scopes(f, registry.iter(), |m| &m.make_success_total)?;
+        stack_make_service_total.fmt_scopes(
+            f,
+            registry.iter().map(|(s, m)| ((s, Failure), m)),
+            |m| &m.make_failure_total,
+        )?;
 
         stack_service_failure_total.fmt_help(f)?;
         stack_service_failure_total.fmt_scopes(f, registry.iter(), |m| &m.service_failure_total)?;

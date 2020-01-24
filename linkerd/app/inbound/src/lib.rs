@@ -175,10 +175,10 @@ impl<A: OrigDstAddr> Config<A> {
                     http_profile_route_proxy.into_inner(),
                 ))
                 .push_pending()
+                .push(metrics.stack.new_layer(stack_labels("profile")))
                 .push_per_service(svc::lock::Layer::default())
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
-                .push(metrics.stack.new_layer(stack_labels("profile")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|p: &Profile| info_span!("profile", addr = %p.addr()))
                 .check_service::<Profile>()

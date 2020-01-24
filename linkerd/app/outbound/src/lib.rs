@@ -223,7 +223,6 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_pending()
                 .push_per_service(svc::layers().push_lock())
                 .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push(metrics.stack.new_layer(stack_labels("forward")))
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
                 })
@@ -348,7 +347,6 @@ impl<A: OrigDstAddr> Config<A> {
                         .push(http::strip_header::request::layer(DST_OVERRIDE_HEADER)),
                 )
                 .check_service::<Logical<HttpEndpoint>>()
-                .push(metrics.stack.new_layer(stack_labels("logical")))
                 .push_trace(|logical: &Logical<_>| info_span!("logical", addr = %logical.addr));
 
             let http_admit_request = svc::layers()
