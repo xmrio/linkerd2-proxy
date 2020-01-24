@@ -34,7 +34,7 @@ pub fn new() -> (Registry, Report) {
 impl Registry {
     pub fn start_stream(&mut self) {
         match self.0.lock() {
-            Ok(mut metrics) => metrics.streams.incr(),
+            Ok(metrics) => metrics.streams.incr(),
             Err(e) => error!(message="failed to lock metrics", %e),
         }
     }
@@ -58,13 +58,13 @@ impl FmtMetrics for Report {
         };
 
         opencensus_span_export_streams.fmt_help(f)?;
-        opencensus_span_export_streams.fmt_metric(f, metrics.streams)?;
+        opencensus_span_export_streams.fmt_metric(f, &metrics.streams)?;
 
         opencensus_span_export_requests.fmt_help(f)?;
-        opencensus_span_export_requests.fmt_metric(f, metrics.requests)?;
+        opencensus_span_export_requests.fmt_metric(f, &metrics.requests)?;
 
         opencensus_span_exports.fmt_help(f)?;
-        opencensus_span_exports.fmt_metric(f, metrics.spans)?;
+        opencensus_span_exports.fmt_metric(f, &metrics.spans)?;
 
         Ok(())
     }

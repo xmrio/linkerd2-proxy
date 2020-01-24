@@ -1247,6 +1247,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "linkerd2-stack-metrics"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "indexmap",
+ "linkerd2-error",
+ "linkerd2-metrics",
+ "linkerd2-stack",
+ "tokio",
+ "tokio-timer",
+ "tower",
+ "tower-util",
+ "tracing",
+]
+
+[[package]]
 name = "linkerd2-test-util"
 version = "0.1.0"
 dependencies = [
