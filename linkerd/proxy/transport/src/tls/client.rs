@@ -6,7 +6,7 @@ pub use rustls::ClientConfig as Config;
 use std::io;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tracing::trace;
+use tracing::{debug, trace};
 
 pub trait HasConfig {
     fn tls_client_config(&self) -> Arc<Config>;
@@ -79,6 +79,7 @@ where
 
     fn call(&mut self, target: T) -> Self::Future {
         let peer_identity = target.peer_identity();
+        debug!(peer.identity = ?peer_identity);
         let tls = self
             .local
             .clone()

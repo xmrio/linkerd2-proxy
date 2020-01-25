@@ -35,8 +35,9 @@ impl<C: ConnectAddr> tower::Service<C> for Connect {
 
     fn call(&mut self, c: C) -> Self::Future {
         let keepalive = self.keepalive;
-        debug!(?keepalive, "Connecting");
-        let future = TcpStream::connect(&c.connect_addr());
+        let addr = c.connect_addr();
+        debug!(peer.addr = %addr, "Connecting");
+        let future = TcpStream::connect(&addr);
         ConnectFuture { future, keepalive }
     }
 }
@@ -47,9 +48,13 @@ impl Future for ConnectFuture {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let io = try_ready!(self.future.poll());
-        debug!("Connected");
         super::set_nodelay_or_warn(&io);
         super::set_keepalive_or_warn(&io, self.keepalive);
+        debug!(
+            local.addr = %io.local_addr().expect("cannot load local addr"),
+            keepalve = ?self.keepalive,
+            "Connected",
+        );
         Ok(io.into())
     }
 }
