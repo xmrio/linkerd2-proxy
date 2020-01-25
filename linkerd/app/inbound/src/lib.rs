@@ -207,7 +207,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // connections?
                 .push_load_shed()
                 // Synthesizes responses for proxy errors.
-                .push(errors::Layer);
+                .push(errors::layer());
 
             let http_server_observability = svc::layers()
                 .push(trace_context::layer(span_sink.map(|span_sink| {

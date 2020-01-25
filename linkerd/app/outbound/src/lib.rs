@@ -361,7 +361,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // connections?
                 .push_load_shed()
                 // Synthesizes responses for proxy errors.
-                .push(errors::Layer)
+                .push(errors::layer())
                 // Initiates OpenCensus tracing.
                 .push(trace_context::layer(span_sink.map(|span_sink| {
                     SpanConverter::server(span_sink, trace_labels())

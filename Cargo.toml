@@ -15,6 +15,7 @@ members = [
     "linkerd/drain",
     "linkerd/duplex",
     "linkerd/error",
+    "linkerd/error-respond",
     "linkerd/exp-backoff",
     "linkerd/fallback",
     "linkerd/http-classify",
