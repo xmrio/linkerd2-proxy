@@ -5,7 +5,7 @@ use crate::pb;
 use futures::{future, try_ready, Future, Poll, Stream};
 use tower::Service;
 use tower_grpc::{self as grpc, generic::client::GrpcService, Body, BoxBody};
-use tracing::trace;
+use tracing::{debug, info, trace};
 
 #[derive(Clone)]
 pub struct Resolve<S> {
@@ -71,7 +71,7 @@ where
 
     fn call(&mut self, target: T) -> Self::Future {
         let path = target.to_string();
-        trace!("resolve {:?}", path);
+        debug!(dst = %path, context=%self.context_token, "Resolving");
         self.service
             .get(grpc::Request::new(api::GetDestination {
                 path,
@@ -99,42 +99,46 @@ where
     fn poll(&mut self) -> Poll<Update<Self::Endpoint>, Self::Error> {
         loop {
             match try_ready!(self.inner.poll()) {
-                Some(api::Update { update }) => match update {
-                    Some(api::update::Update::Add(api::WeightedAddrSet {
-                        addrs,
-                        metric_labels,
-                    })) => {
-                        let addr_metas = addrs
-                            .into_iter()
-                            .filter_map(|addr| pb::to_addr_meta(addr, &metric_labels))
-                            .collect::<Vec<_>>();
-                        if !addr_metas.is_empty() {
-                            return Ok(Update::Add(addr_metas).into());
+                Some(api::Update { update }) => {
+                    match update {
+                        Some(api::update::Update::Add(api::WeightedAddrSet {
+                            addrs,
+                            metric_labels,
+                        })) => {
+                            let addr_metas = addrs
+                                .into_iter()
+                                .filter_map(|addr| pb::to_addr_meta(addr, &metric_labels))
+                                .collect::<Vec<_>>();
+                            if !addr_metas.is_empty() {
+                                debug!(endpoints = %addr_metas.len(), "Add");
+                                return Ok(Update::Add(addr_metas).into());
+                            }
                         }
-                    }
 
-                    Some(api::update::Update::Remove(api::AddrSet { addrs })) => {
-                        let sock_addrs = addrs
-                            .into_iter()
-                            .filter_map(pb::to_sock_addr)
-                            .collect::<Vec<_>>();
-                        if !sock_addrs.is_empty() {
-                            return Ok(Update::Remove(sock_addrs).into());
+                        Some(api::update::Update::Remove(api::AddrSet { addrs })) => {
+                            let sock_addrs = addrs
+                                .into_iter()
+                                .filter_map(pb::to_sock_addr)
+                                .collect::<Vec<_>>();
+                            if !sock_addrs.is_empty() {
+                                debug!(endpoints = %sock_addrs.len(), "Remove");
+                                return Ok(Update::Remove(sock_addrs).into());
+                            }
                         }
+
+                        Some(api::update::Update::NoEndpoints(api::NoEndpoints { exists })) => {
+                            info!("No endpoints");
+                            let update = if exists {
+                                Update::Empty
+                            } else {
+                                Update::DoesNotExist
+                            };
+                            return Ok(update.into());
+                        }
+
+                        None => {} // continue
                     }
-
-                    Some(api::update::Update::NoEndpoints(api::NoEndpoints { exists })) => {
-                        let update = if exists {
-                            Update::Empty
-                        } else {
-                            Update::DoesNotExist
-                        };
-                        return Ok(update.into());
-                    }
-
-                    None => {} // continue
-                },
-
+                }
                 None => return Err(grpc::Status::new(grpc::Code::Ok, "end of stream")),
             };
         }

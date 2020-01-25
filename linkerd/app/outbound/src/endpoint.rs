@@ -261,7 +261,7 @@ impl MapEndpoint<Concrete<http::Settings>, Metadata> for FromMetadata {
         addr: SocketAddr,
         metadata: Metadata,
     ) -> Self::Out {
-        debug!(%addr, ?metadata, "Resolved endpoint");
+        tracing::trace!(%addr, ?metadata, "Resolved endpoint");
         let identity = metadata
             .identity()
             .cloned()
