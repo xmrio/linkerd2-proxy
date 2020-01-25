@@ -206,6 +206,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // the client? Should we instead limit the number of active
                 // connections?
                 .push_load_shed()
+                .push(metrics.http_errors)
                 // Synthesizes responses for proxy errors.
                 .push(errors::layer());
 

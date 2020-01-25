@@ -1,12 +1,37 @@
+use crate::proxy::identity;
 use http::{header::HeaderValue, StatusCode};
+use linkerd2_cache::error as cache;
 use linkerd2_error::Error;
+use linkerd2_error_metrics as metrics;
 use linkerd2_error_respond as respond;
+pub use linkerd2_error_respond::RespondLayer;
 use linkerd2_proxy_http::HasH2Reason;
+use tower::load_shed::error as shed;
 use tower_grpc::{self as grpc, Code};
 use tracing::debug;
 
 pub fn layer<B: Default>() -> respond::RespondLayer<NewRespond<B>> {
     respond::RespondLayer::new(NewRespond(std::marker::PhantomData))
+}
+
+#[derive(Clone, Default)]
+pub struct Metrics(metrics::Registry<Label>);
+
+pub type MetricsLayer = metrics::RecordErrorLayer<LabelError, Label>;
+
+/// Error metric labels.
+#[derive(Copy, Clone, Debug)]
+pub struct LabelError(super::metric_labels::Direction);
+
+pub type Label = (super::metric_labels::Direction, Reason);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Reason {
+    CacheFull,
+    DispatchTimeout,
+    IdentityRequired,
+    LoadShed,
+    Unexpected,
 }
 
 #[derive(Debug)]
@@ -55,7 +80,7 @@ impl<B: Default> respond::Respond for Respond<B> {
             }
 
             if *is_grpc {
-                debug!("Responding with a gRPC error");
+                debug!("Handling error with gRPC status code");
                 let mut rsp = http::Response::builder()
                     .header(http::header::CONTENT_LENGTH, "0")
                     .body(B::default())
@@ -66,7 +91,7 @@ impl<B: Default> respond::Respond for Respond<B> {
         }
 
         let status = http_status(error);
-        debug!(%status, "Responding with an HTTP error");
+        debug!(%status, "Handling error with HTTP response");
         return Ok(http::Response::builder()
             .status(status)
             .header(http::header::CONTENT_LENGTH, "0")
@@ -76,56 +101,50 @@ impl<B: Default> respond::Respond for Respond<B> {
 }
 
 fn http_status(error: Error) -> StatusCode {
-    use linkerd2_cache::error as cache;
-    use tower::load_shed::error as shed;
-
     if error.is::<cache::NoCapacity>() {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<shed::Overloaded>() {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<tower::timeout::error::Elapsed>() {
         http::StatusCode::SERVICE_UNAVAILABLE
-    } else if let Some(StatusError { http_status, .. }) = error.downcast_ref() {
-        *http_status
+    } else if error.is::<IdentityRequired>() {
+        http::StatusCode::FORBIDDEN
     } else {
         http::StatusCode::BAD_GATEWAY
     }
 }
 
 fn set_grpc_status(error: Error, headers: &mut http::HeaderMap) {
-    use linkerd2_cache::error as cache;
-    use tower::load_shed::error as shed;
+    const GRPC_STATUS: &'static str = "grpc-status";
+    const GRPC_MESSAGE: &'static str = "grpc-message";
 
     if error.is::<cache::NoCapacity>() {
-        headers.insert("grpc-status", code_header(Code::Unavailable));
+        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
         headers.insert(
-            "grpc-message",
-            HeaderValue::from_static("Linkerd router cache exhausted"),
+            GRPC_MESSAGE,
+            HeaderValue::from_static("proxy router cache exhausted"),
         );
     } else if error.is::<shed::Overloaded>() {
-        headers.insert("grpc-status", code_header(Code::Unavailable));
+        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
         headers.insert(
-            "grpc-message",
-            HeaderValue::from_static("Linkerd max-concurrency exhausted"),
+            GRPC_MESSAGE,
+            HeaderValue::from_static("proxy max-concurrency exhausted"),
         );
     } else if error.is::<tower::timeout::error::Elapsed>() {
-        headers.insert("grpc-status", code_header(Code::Unavailable));
+        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
         headers.insert(
-            "grpc-message",
-            HeaderValue::from_static("Linkerd dispatch timed out"),
+            GRPC_MESSAGE,
+            HeaderValue::from_static("proxy dispatch timed out"),
         );
-    } else if let Some(StatusError {
-        grpc_code, error, ..
-    }) = error.downcast_ref()
-    {
-        headers.insert("grpc-status", code_header(*grpc_code));
+    } else if error.is::<IdentityRequired>() {
+        headers.insert(GRPC_STATUS, code_header(Code::FailedPrecondition));
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {
-            headers.insert("grpc-message", msg);
+            headers.insert(GRPC_MESSAGE, msg);
         }
     } else {
-        headers.insert("grpc-status", code_header(Code::Internal));
+        headers.insert(GRPC_STATUS, code_header(Code::Internal));
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {
-            headers.insert("grpc-message", msg);
+            headers.insert(GRPC_MESSAGE, msg);
         }
     }
 }
@@ -155,20 +174,78 @@ fn code_header(code: grpc::Code) -> HeaderValue {
 }
 
 #[derive(Debug)]
-pub struct StatusError {
-    pub http_status: http::StatusCode,
-    pub grpc_code: grpc::Code,
-    pub error: Error,
+pub struct IdentityRequired {
+    pub required: identity::Name,
+    pub found: Option<identity::Name>,
 }
 
-impl std::fmt::Display for StatusError {
+impl std::fmt::Display for IdentityRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.error.fmt(f)
+        match self.found {
+            Some(ref found) => write!(
+                f,
+                "request required the identity '{}' but '{}' found",
+                self.required, found
+            ),
+            None => write!(
+                f,
+                "request required the identity '{}' but no identity found",
+                self.required
+            ),
+        }
     }
 }
 
-impl std::error::Error for StatusError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.error.source()
+impl std::error::Error for IdentityRequired {}
+
+impl metrics::LabelError<Error> for LabelError {
+    type Labels = Label;
+
+    fn label_error(&self, err: &Error) -> Self::Labels {
+        let reason = if err.is::<cache::NoCapacity>() {
+            Reason::CacheFull
+        } else if err.is::<shed::Overloaded>() {
+            Reason::LoadShed
+        } else if err.is::<tower::timeout::error::Elapsed>() {
+            Reason::DispatchTimeout
+        } else if err.is::<IdentityRequired>() {
+            Reason::IdentityRequired
+        } else {
+            Reason::Unexpected
+        };
+
+        (self.0, reason)
+    }
+}
+
+impl metrics::FmtLabels for Reason {
+    fn fmt_labels(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "cause=\"{}\"",
+            match self {
+                Reason::CacheFull => "cache full",
+                Reason::LoadShed => "load shed",
+                Reason::DispatchTimeout => "dispatch timeout",
+                Reason::IdentityRequired => "identity required",
+                Reason::Unexpected => "unexpected",
+            }
+        )
+    }
+}
+
+impl Metrics {
+    pub fn inbound(&self) -> MetricsLayer {
+        self.0
+            .layer(LabelError(super::metric_labels::Direction::In))
+    }
+
+    pub fn outbound(&self) -> MetricsLayer {
+        self.0
+            .layer(LabelError(super::metric_labels::Direction::Out))
+    }
+
+    pub fn report(&self) -> metrics::Registry<Label> {
+        self.0.clone()
     }
 }
