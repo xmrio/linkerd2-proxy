@@ -1,6 +1,6 @@
 use futures::{future, try_ready, Async, Future, Poll, Stream};
 use linkerd2_error::{Error, Recover};
-use tracing;
+use tracing::{debug, trace};
 
 pub struct Service<T, R, M>
 where
@@ -77,6 +77,7 @@ where
         loop {
             self.state = match self.state {
                 State::Disconnected { ref mut backoff } => {
+                    trace!("Disconnected");
                     // When disconnected, try to build a new inner sevice. If
                     // this call fails, we must not recover, since
                     // `make_service` is now unusable.
@@ -90,33 +91,39 @@ where
                 State::Pending {
                     ref mut future,
                     ref mut backoff,
-                } => match future.poll() {
-                    Ok(Async::NotReady) => return Ok(Async::NotReady),
-                    Ok(Async::Ready(service)) => State::Service(service),
-                    Err(e) => {
-                        // If the service cannot be built, try to recover using
-                        // the existing backoff.
-                        let error: Error = e.into();
-                        tracing::debug!(message="Failed to connect", %error);
-                        State::Recover {
-                            error: Some(error),
-                            backoff: backoff.take(),
+                } => {
+                    trace!("Reconnecting");
+                    match future.poll() {
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Ok(Async::Ready(service)) => State::Service(service),
+                        Err(e) => {
+                            // If the service cannot be built, try to recover using
+                            // the existing backoff.
+                            let error: Error = e.into();
+                            debug!(message="Failed to connect", %error);
+                            State::Recover {
+                                error: Some(error),
+                                backoff: backoff.take(),
+                            }
                         }
                     }
-                },
+                }
 
-                State::Service(ref mut service) => match service.poll_ready() {
-                    Ok(ready) => return Ok(ready),
-                    Err(e) => {
-                        // If the service fails, try to recover.
-                        let error: Error = e.into();
-                        tracing::debug!(message="Service failed", %error);
-                        State::Recover {
-                            error: Some(error),
-                            backoff: None,
+                State::Service(ref mut service) => {
+                    trace!("Establshed");
+                    match service.poll_ready() {
+                        Ok(ready) => return Ok(ready),
+                        Err(e) => {
+                            // If the service fails, try to recover.
+                            let error: Error = e.into();
+                            debug!(%error, "Service failed");
+                            State::Recover {
+                                error: Some(error),
+                                backoff: None,
+                            }
                         }
                     }
-                },
+                }
 
                 State::Recover {
                     ref mut error,
@@ -126,7 +133,7 @@ where
                     // prefer the existing backoff to the new one.
                     let error = error.take().expect("error must be set");
                     let new_backoff = self.recover.recover(error)?;
-                    tracing::debug!("Recovering");
+                    debug!("Recovering");
                     State::Backoff(Some(backoff.take().unwrap_or(new_backoff)))
                 }
 
