@@ -367,7 +367,7 @@ mod tests {
                 hist.add(obs);
             }
 
-            hist.sum == expected_sum
+            hist.sum.value() == expected_sum.value()
         }
 
         fn count_equals_number_of_observations(observations: Vec<u64>) -> bool {
@@ -377,11 +377,8 @@ mod tests {
                 hist.add(*obs);
             }
 
-            let count: u64 = hist.buckets.iter().map(|&c| {
-                let count: u64 = c.into();
-                count
-            }).sum();
-            count as usize == observations.len()
+            let count = hist.buckets.iter().map(|ref c| c.value()).sum::<u64>() as usize;
+            count == observations.len()
         }
 
         fn multiple_observations_increment_buckets(observations: Vec<u64>) -> bool {
@@ -403,7 +400,7 @@ mod tests {
             }
 
             for (i, count) in hist.buckets.iter().enumerate() {
-                let count: u64 = (*count).into();
+                let count = count.value();
                 assert_eq!(buckets_and_counts.get(&i).unwrap_or(&0), &count);
             }
             true

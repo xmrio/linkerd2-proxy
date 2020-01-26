@@ -1,4 +1,4 @@
-use super::prom::{FmtLabels, FmtMetric};
+use super::prom::{FmtLabels, FmtMetric, MAX_PRECISE_VALUE};
 use std::fmt::{self, Display};
 use std::ops;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,16 +21,19 @@ pub struct Counter(AtomicU64);
 // ===== impl Counter =====
 
 impl Counter {
-    /// Increment the counter by one.
-    ///
-    /// This function wraps on 52-bit overflows.
     pub fn incr(&self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
+        self.add(1)
     }
 
-    /// Return current counter value.
+    pub fn add(&self, n: u64) {
+        self.0.fetch_add(n, Ordering::Release);
+    }
+
+    /// Return current counter value, wrapped to be safe for use with Prometheus.
     pub fn value(&self) -> u64 {
-        self.0.load(Ordering::Acquire)
+        self.0
+            .load(Ordering::Acquire)
+            .wrapping_rem(MAX_PRECISE_VALUE + 1)
     }
 }
 
@@ -114,18 +117,19 @@ mod tests {
 
     #[test]
     fn count_wrapping() {
-        let mut cnt = Counter::from(MAX_PRECISE_COUNTER - 1);
-        assert_eq!(cnt.value(), MAX_PRECISE_COUNTER - 1);
+        let cnt = Counter::from(MAX_PRECISE_VALUE - 1);
+        assert_eq!(cnt.value(), MAX_PRECISE_VALUE - 1);
         cnt.incr();
-        assert_eq!(cnt.value(), MAX_PRECISE_COUNTER);
-        assert_eq!(cnt + 1, Counter::from(0));
+        assert_eq!(cnt.value(), MAX_PRECISE_VALUE);
         cnt.incr();
         assert_eq!(cnt.value(), 0);
+        cnt.incr();
+        assert_eq!(cnt.value(), 1);
 
-        let max = Counter::from(MAX_PRECISE_COUNTER);
-        assert_eq!(max.value(), MAX_PRECISE_COUNTER);
+        let max = Counter::from(MAX_PRECISE_VALUE);
+        assert_eq!(max.value(), MAX_PRECISE_VALUE);
 
-        let over = Counter::from(MAX_PRECISE_COUNTER + 1);
+        let over = Counter::from(MAX_PRECISE_VALUE + 1);
         assert_eq!(over.value(), 0);
     }
 }
