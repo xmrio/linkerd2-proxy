@@ -1,17 +1,16 @@
-use futures::{Async, Future, Poll};
+use futures::{Async, Poll};
 use indexmap::IndexMap;
 use linkerd2_metrics::{metrics, Counter, FmtLabels, FmtMetrics};
-use linkerd2_stack::{NewService, Proxy};
 use std::fmt;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 metrics! {
-    stack_failure_total: Counter { "Total number stacks failures" },
-    stack_make_service_total: Counter { "Total number of services made" },
-    stack_service_failure_total: Counter { "Total number of service failures" },
-    stack_service_request_total: Counter { "Total number of requests processed by services" },
-    stack_service_drop_total: Counter { "Total number of services dropped" }
+    stack_create_total: Counter { "Total number of services created" },
+    stack_drop_total: Counter { "Total number of services dropped" },
+    stack_poll_total: Counter { "Total number of stack polls" },
+    stack_poll_total_millis: Counter { "Total number of milliseconds this service has spent awaiting readiness" }
 }
 
 type Registry<L> = Arc<Mutex<IndexMap<L, Arc<Metrics>>>>;
@@ -34,23 +33,24 @@ pub struct Layer {
 
 #[derive(Debug, Default)]
 struct Metrics {
-    failure_total: Counter,
-    make_success_total: Counter,
-    make_failure_total: Counter,
-    service_failure_total: Counter,
-    service_request_total: Counter,
-    service_drop_total: Counter,
-}
-
-#[derive(Clone, Debug)]
-pub struct Make<S> {
-    inner: S,
-    metrics: Arc<Metrics>,
+    create_total: Counter,
+    drop_total: Counter,
+    ready_total: Counter,
+    not_ready_total: Counter,
+    poll_millis: Counter,
+    error_total: Counter,
 }
 
 #[derive(Debug)]
 pub struct Service<S> {
     inner: S,
+    metrics: Arc<Metrics>,
+    blocked_since: Option<Instant>,
+}
+
+#[derive(Debug)]
+pub struct ResponseFuture<F> {
+    inner: F,
     metrics: Arc<Metrics>,
 }
 
@@ -93,84 +93,21 @@ impl<L: Hash + Eq> Clone for NewLayer<L> {
 }
 
 impl<S> tower::layer::Layer<S> for Layer {
-    type Service = Make<S>;
+    type Service = Service<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
+        self.metrics.create_total.incr();
         Self::Service {
             inner,
             metrics: self.metrics.clone(),
+            blocked_since: None,
         }
     }
 }
 
-impl<T, S> NewService<T> for Make<S>
-where
-    S: NewService<T>,
-{
-    type Service = Service<S::Service>;
-
-    fn new_service(&self, target: T) -> Self::Service {
-        let inner = self.inner.new_service(target);
-        self.metrics.make_success_total.incr();
-        Self::Service {
-            inner,
-            metrics: self.metrics.clone(),
-        }
-    }
-}
-
-impl<T, S> tower::Service<T> for Make<S>
+impl<T, S> tower::Service<T> for Service<S>
 where
     S: tower::Service<T>,
-{
-    type Response = Service<S::Response>;
-    type Error = S::Error;
-    type Future = Service<S::Future>;
-
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        match self.inner.poll_ready() {
-            Ok(ready) => Ok(ready),
-            Err(e) => {
-                self.metrics.failure_total.incr();
-                Err(e)
-            }
-        }
-    }
-
-    fn call(&mut self, target: T) -> Self::Future {
-        Service {
-            inner: self.inner.call(target),
-            metrics: self.metrics.clone(),
-        }
-    }
-}
-
-impl<F: Future> Future for Service<F> {
-    type Item = Service<F::Item>;
-    type Error = F::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.inner.poll() {
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Ok(Async::Ready(inner)) => {
-                self.metrics.make_success_total.incr();
-                let service = Self::Item {
-                    inner,
-                    metrics: self.metrics.clone(),
-                };
-                Ok(service.into())
-            }
-            Err(e) => {
-                self.metrics.make_failure_total.incr();
-                Err(e)
-            }
-        }
-    }
-}
-
-impl<Req, S> tower::Service<Req> for Service<S>
-where
-    S: tower::Service<Req>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -178,39 +115,40 @@ where
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         match self.inner.poll_ready() {
-            Ok(ready) => Ok(ready),
+            Ok(Async::NotReady) => {
+                self.metrics.not_ready_total.incr();
+                if self.blocked_since.is_none() {
+                    self.blocked_since = Some(Instant::now());
+                }
+                Ok(Async::NotReady)
+            }
+            Ok(Async::Ready(())) => {
+                self.metrics.ready_total.incr();
+                if let Some(t0) = self.blocked_since.take() {
+                    let not_ready = Instant::now() - t0;
+                    self.metrics.poll_millis.add(not_ready.as_millis() as u64);
+                }
+                Ok(Async::Ready(()))
+            }
             Err(e) => {
-                self.metrics.service_failure_total.incr();
+                self.metrics.error_total.incr();
+                if let Some(t0) = self.blocked_since.take() {
+                    let not_ready = Instant::now() - t0;
+                    self.metrics.poll_millis.add(not_ready.as_millis() as u64);
+                }
                 Err(e)
             }
         }
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
-        self.metrics.service_request_total.incr();
-        self.inner.call(req)
-    }
-}
-
-impl<Req, S, P> Proxy<Req, S> for Service<P>
-where
-    P: Proxy<Req, S>,
-    S: tower::Service<P::Request>,
-{
-    type Request = P::Request;
-    type Response = P::Response;
-    type Error = P::Error;
-    type Future = P::Future;
-
-    fn proxy(&self, svc: &mut S, req: Req) -> Self::Future {
-        self.metrics.service_request_total.incr();
-        self.inner.proxy(svc, req)
+    fn call(&mut self, target: T) -> Self::Future {
+        self.inner.call(target)
     }
 }
 
 impl<S> Drop for Service<S> {
     fn drop(&mut self) {
-        self.metrics.service_drop_total.incr();
+        self.metrics.drop_total.incr();
     }
 }
 
@@ -229,34 +167,48 @@ impl<L: FmtLabels + Hash + Eq> FmtMetrics for Report<L> {
             return Ok(());
         }
 
-        stack_failure_total.fmt_help(f)?;
-        stack_failure_total.fmt_scopes(f, registry.iter(), |m| &m.failure_total)?;
+        stack_create_total.fmt_help(f)?;
+        stack_create_total.fmt_scopes(f, registry.iter(), |m| &m.create_total)?;
 
-        stack_make_service_total.fmt_help(f)?;
-        stack_make_service_total.fmt_scopes(f, registry.iter(), |m| &m.make_success_total)?;
-        stack_make_service_total.fmt_scopes(
+        stack_drop_total.fmt_help(f)?;
+        stack_drop_total.fmt_scopes(f, registry.iter(), |m| &m.drop_total)?;
+
+        stack_poll_total.fmt_help(f)?;
+        stack_poll_total.fmt_scopes(
             f,
-            registry.iter().map(|(s, m)| ((s, Failure), m)),
-            |m| &m.make_failure_total,
+            registry.iter().map(|(s, m)| ((s, Ready::Ready), m)),
+            |m| &m.ready_total,
+        )?;
+        stack_poll_total.fmt_scopes(
+            f,
+            registry.iter().map(|(s, m)| ((s, Ready::NotReady), m)),
+            |m| &m.not_ready_total,
+        )?;
+        stack_poll_total.fmt_scopes(
+            f,
+            registry.iter().map(|(s, m)| ((s, Ready::Error), m)),
+            |m| &m.error_total,
         )?;
 
-        stack_service_failure_total.fmt_help(f)?;
-        stack_service_failure_total.fmt_scopes(f, registry.iter(), |m| &m.service_failure_total)?;
-
-        stack_service_request_total.fmt_help(f)?;
-        stack_service_request_total.fmt_scopes(f, registry.iter(), |m| &m.service_request_total)?;
-
-        stack_service_drop_total.fmt_help(f)?;
-        stack_service_drop_total.fmt_scopes(f, registry.iter(), |m| &m.service_drop_total)?;
+        stack_poll_total_millis.fmt_help(f)?;
+        stack_poll_total_millis.fmt_scopes(f, registry.iter(), |m| &m.poll_millis)?;
 
         Ok(())
     }
 }
 
-struct Failure;
+enum Ready {
+    Ready,
+    NotReady,
+    Error,
+}
 
-impl FmtLabels for Failure {
+impl FmtLabels for Ready {
     fn fmt_labels(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "failure=\"true\"")
+        match self {
+            Ready::Ready => write!(f, "ready=\"true\""),
+            Ready::NotReady => write!(f, "ready=\"false\""),
+            Ready::Error => write!(f, "ready=\"error\""),
+        }
     }
 }

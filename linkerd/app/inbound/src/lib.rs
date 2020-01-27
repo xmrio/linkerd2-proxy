@@ -114,7 +114,7 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push(metrics.stack.new_layer(stack_labels("endpoint")))
+                .push_per_service(metrics.stack.new_layer(stack_labels("endpoint")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
                 .spawn_cache(cache_capacity, cache_max_idle_age)
@@ -155,7 +155,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // absolute-form on the outbound side.
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
-                .push(metrics.stack.new_layer(stack_labels("target")))
+                .push_per_service(metrics.stack.new_layer(stack_labels("target")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
                 .check_new_clone_service::<Target>()
@@ -174,8 +174,8 @@ impl<A: OrigDstAddr> Config<A> {
                     profiles_client,
                     http_profile_route_proxy.into_inner(),
                 ))
+                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
                 .push_pending()
-                .push(metrics.stack.new_layer(stack_labels("profile")))
                 .push_per_service(svc::lock::Layer::default())
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
@@ -243,7 +243,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(http_strip_headers)
                 .push_per_service(http_admit_request)
                 .push_per_service(http_server_observability)
-                .push(metrics.stack.new_layer(stack_labels("source")))
+                .push_per_service(metrics.stack.new_layer(stack_labels("source")))
                 .push_trace(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
