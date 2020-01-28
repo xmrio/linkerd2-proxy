@@ -105,6 +105,17 @@ impl<S> tower::layer::Layer<S> for Layer {
     }
 }
 
+impl<S: Clone> Clone for Service<S> {
+    fn clone(&self) -> Self {
+        self.metrics.create_total.incr();
+        Self {
+            inner: self.inner.clone(),
+            metrics: self.metrics.clone(),
+            blocked_since: None,
+        }
+    }
+}
+
 impl<T, S> tower::Service<T> for Service<S>
 where
     S: tower::Service<T>,

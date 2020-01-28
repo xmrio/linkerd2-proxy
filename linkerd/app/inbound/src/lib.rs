@@ -114,9 +114,10 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push_per_service(metrics.stack.new_layer(stack_labels("endpoint")))
+                .push(metrics.stack.new_layer(stack_labels("endpoint.make")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
+                .push_per_service(metrics.stack.new_layer(stack_labels("endpoint")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|ep: &HttpEndpoint| {
                     info_span!(
@@ -155,9 +156,10 @@ impl<A: OrigDstAddr> Config<A> {
                 // absolute-form on the outbound side.
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
-                .push_per_service(metrics.stack.new_layer(stack_labels("target")))
+                .push(metrics.stack.new_layer(stack_labels("target.make")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
+                .push_per_service(metrics.stack.new_layer(stack_labels("target")))
                 .check_new_clone_service::<Target>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|_: &Target| info_span!("target"))
@@ -174,9 +176,10 @@ impl<A: OrigDstAddr> Config<A> {
                     profiles_client,
                     http_profile_route_proxy.into_inner(),
                 ))
-                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
+                .push(metrics.stack.new_layer(stack_labels("profile.make")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::default())
+                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)

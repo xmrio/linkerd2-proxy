@@ -198,16 +198,22 @@ impl<A: OrigDstAddr> Config<A> {
             let http_balancer_cache = http_endpoint
                 .clone()
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
+                .push(
+                    metrics
+                        .stack
+                        .new_layer(stack_labels("balance.endpoint.make")),
+                )
                 .push_per_service(metrics.stack.new_layer(stack_labels("balance.endpoint")))
                 .push_per_service(http::box_request::Layer::new())
                 .push_spawn_ready()
                 .check_service::<Target<HttpEndpoint>>()
                 .push(discover)
                 .push_per_service(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
-                .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
+                .push(metrics.stack.new_layer(stack_labels("balance.make")))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
                 .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
+                .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
 
@@ -219,9 +225,9 @@ impl<A: OrigDstAddr> Config<A> {
             let http_forward_cache = http_endpoint
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
                 .push_per_service(http::box_request::Layer::new())
-                .push_per_service(metrics.stack.new_layer(stack_labels("forward.endpoint")))
                 .push_pending()
                 .push_per_service(svc::layers().push_lock())
+                .push_per_service(metrics.stack.new_layer(stack_labels("forward.endpoint")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
@@ -286,9 +292,9 @@ impl<A: OrigDstAddr> Config<A> {
                         inner,
                     },
                 ))
-                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
                 .push_pending()
                 .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
+                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|_: &Profile| info_span!("profile"))
                 .check_service::<Profile>()
@@ -301,8 +307,8 @@ impl<A: OrigDstAddr> Config<A> {
             // For example, a client may send requests to `foo` or `foo.ns`; and
             // the canonical form of these names is `foo.ns.svc.cluster.local
             let dns_refine_cache = svc::stack(dns_resolver.into_make_refine())
-                .push_per_service(metrics.stack.new_layer(stack_labels("canonicalize")))
                 .push_per_service(svc::lock::Layer::default())
+                .push_per_service(metrics.stack.new_layer(stack_labels("canonicalize")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|name: &dns::Name| info_span!("canonicalize", %name))
                 // Obtains the lock, advances the state of the resolution
