@@ -116,8 +116,8 @@ impl<A: OrigDstAddr> Config<A> {
                 // Initiates mTLS if the target is configured with identity.
                 .push(tls::client::Layer::new(local_identity))
                 // Limits the time we wait for a connection to be established.
-                .push_timeout(connect.timeout)
-                .push(metrics.transport.layer_connect(TransportLabels));
+                .push_timeout(connect.timeout);
+            //.push(metrics.transport.layer_connect(TransportLabels));
 
             // Forwards TCP streams that cannot be decoded as HTTP.
             let tcp_forward = tcp_connect
@@ -131,24 +131,24 @@ impl<A: OrigDstAddr> Config<A> {
             // export.
             let http_endpoint = {
                 let observability = svc::layers()
-                    .push(tap_layer.clone())
-                    .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                    .push_per_service(trace_context::layer(
-                        span_sink
-                            .clone()
-                            .map(|sink| SpanConverter::client(sink, trace_labels())),
-                    ));
+                    //.push(tap_layer.clone())
+                    .push(metrics.http_endpoint.into_layer::<classify::Response>());
+                // .push_per_service(trace_context::layer(
+                //     span_sink
+                //         .clone()
+                //         .map(|sink| SpanConverter::client(sink, trace_labels())),
+                // ));
 
                 // Checks the headers to validate that a client-specified required
                 // identity matches the configured identity.
-                let identity_headers = svc::layers()
-                    .push_per_service(
-                        svc::layers()
-                            .push(http::strip_header::response::layer(L5D_REMOTE_IP))
-                            .push(http::strip_header::response::layer(L5D_SERVER_ID))
-                            .push(http::strip_header::request::layer(L5D_REQUIRE_ID)),
-                    )
-                    .push(require_identity_on_endpoint::layer());
+                let identity_headers = svc::layers();
+                // .push_per_service(
+                //     svc::layers()
+                //         .push(http::strip_header::response::layer(L5D_REMOTE_IP))
+                //         .push(http::strip_header::response::layer(L5D_SERVER_ID))
+                //         .push(http::strip_header::request::layer(L5D_REQUIRE_ID)),
+                // )
+                // .push(require_identity_on_endpoint::layer());
 
                 tcp_connect
                     .clone()
@@ -162,8 +162,8 @@ impl<A: OrigDstAddr> Config<A> {
                         let backoff = connect.backoff.clone();
                         move |_| Ok(backoff.stream())
                     }))
-                    .push(observability.clone())
-                    .push(identity_headers.clone())
+                    //.push(observability.clone())
+                    //.push(identity_headers.clone())
                     // Ensures that the request's URI is in the proper form.
                     .push(http::normalize_uri::layer())
                     // Upgrades HTTP/1 requests to be transported over HTTP/2
@@ -210,11 +210,11 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_service::<Target<HttpEndpoint>>()
                 .push(discover)
                 .push_per_service(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
-                .push(metrics.stack.new_layer(stack_labels("balance.make")))
+                //.push(metrics.stack.new_layer(stack_labels("balance.make")))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
                 .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
-                .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
+                //.push_per_service(metrics.stack.new_layer(stack_labels("balance")))
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
 
@@ -388,15 +388,15 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_make_ready()
                 .push_timeout(service_acquisition_timeout)
                 .push(router::Layer::new(LogicalPerRequest::from))
-                // Used by tap.
-                .push_http_insert_target()
-                .push_per_service(http_admit_request)
-                .push_per_service(metrics.stack.new_layer(stack_labels("source")))
-                .push_trace(
-                    |src: &tls::accept::Meta| {
-                        info_span!("source", target.addr = %src.addrs.target_addr())
-                    },
-                )
+                // // Used by tap.
+                // .push_http_insert_target()
+                //.push_per_service(http_admit_request)
+                //.push_per_service(metrics.stack.new_layer(stack_labels("source")))
+                // .push_trace(
+                //     |src: &tls::accept::Meta| {
+                //         info_span!("source", target.addr = %src.addrs.target_addr())
+                //     },
+                // )
                 .check_new_service::<tls::accept::Meta>();
 
             let tcp_server = Server::new(
