@@ -356,26 +356,26 @@ impl<A: OrigDstAddr> Config<A> {
             //     .check_service::<Logical<HttpEndpoint>>()
             //     .push_trace(|logical: &Logical<_>| info_span!("logical", addr = %logical.addr));
 
-            let http_admit_request = svc::layers()
-                // Ensures that load is not shed if the inner service is in-use.
-                .push_oneshot()
-                // Limits the number of in-flight requests.
-                .push_concurrency_limit(max_in_flight_requests)
-                // Sheds load if too many requests are in flight.
-                //
-                // XXX Can this be removed? Is it okay to just backpressure onto
-                // the client? Should we instead limit the number of active
-                // connections?
-                .push_load_shed()
-                // Synthesizes responses for proxy errors.
-                .push(metrics.http_errors)
-                .push(errors::layer())
-                // Initiates OpenCensus tracing.
-                .push(trace_context::layer(span_sink.map(|span_sink| {
-                    SpanConverter::server(span_sink, trace_labels())
-                })))
-                // Tracks proxy handletime.
-                .push(metrics.http_handle_time.layer());
+            // let http_admit_request = svc::layers()
+            //     // Ensures that load is not shed if the inner service is in-use.
+            //     .push_oneshot()
+            //     // Limits the number of in-flight requests.
+            //     .push_concurrency_limit(max_in_flight_requests)
+            //     // Sheds load if too many requests are in flight.
+            //     //
+            //     // XXX Can this be removed? Is it okay to just backpressure onto
+            //     // the client? Should we instead limit the number of active
+            //     // connections?
+            //     .push_load_shed()
+            //     // Synthesizes responses for proxy errors.
+            //     .push(metrics.http_errors)
+            //     .push(errors::layer())
+            //     // Initiates OpenCensus tracing.
+            //     .push(trace_context::layer(span_sink.map(|span_sink| {
+            //         SpanConverter::server(span_sink, trace_labels())
+            //     })))
+            //     // Tracks proxy handletime.
+            //     .push(metrics.http_handle_time.layer());
 
             let http_logical_router =
                 http_balancer_cache.push_map_target(|inner: Logical<HttpEndpoint>| Concrete {
