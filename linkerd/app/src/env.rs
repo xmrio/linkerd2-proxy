@@ -186,8 +186,8 @@ const DEFAULT_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 1048576; // 1MB ~ 16 streams
 
 /// It's assumed that a typical proxy can serve inbound traffic for up to 100 pod-local
 /// HTTP services and may communicate with up to 10K external HTTP domains.
-const DEFAULT_INBOUND_ROUTER_CAPACITY: usize = 100;
-const DEFAULT_OUTBOUND_ROUTER_CAPACITY: usize = 10_000;
+const DEFAULT_INBOUND_ROUTER_CAPACITY: usize = 10;
+const DEFAULT_OUTBOUND_ROUTER_CAPACITY: usize = 10;
 
 const DEFAULT_INBOUND_ROUTER_MAX_IDLE_AGE: Duration = Duration::from_secs(60);
 const DEFAULT_OUTBOUND_ROUTER_MAX_IDLE_AGE: Duration = Duration::from_secs(60);
