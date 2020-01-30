@@ -4,6 +4,7 @@
 //! endpoints inbound to the local application.
 
 #![deny(warnings, rust_2018_idioms)]
+#![allow(warnings)]
 
 use futures::future;
 use linkerd2_app_core::{
@@ -104,9 +105,9 @@ impl<A: OrigDstAddr> Config<A> {
             // Establishes connections to the local application (for both
             // TCP forwarding and HTTP proxying).
             let connect_stack = svc::stack(connect::svc(connect.keepalive))
-                .push(tls::client::layer(local_identity.clone()))
-                .push_timeout(connect.timeout)
-                .push(metrics.transport.layer_connect(TransportLabels))
+                // .push(tls::client::layer(local_identity.clone()))
+                // .push_timeout(connect.timeout)
+                // .push(metrics.transport.layer_connect(TransportLabels))
                 .push(rewrite_loopback_addr::layer());
 
             // Instantiates an HTTP client for a `client::Config`
@@ -117,20 +118,20 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push(trace_context::layer(span_sink.clone().map(|span_sink| {
-                    SpanConverter::client(span_sink, trace_labels())
-                })))
+                // .push(trace_context::layer(span_sink.clone().map(|span_sink| {
+                //     SpanConverter::client(span_sink, trace_labels())
+                // })))
                 .push(normalize_uri::layer());
 
             // A stack configured by `router::Config`, responsible for building
             // a router made of route stacks configured by `inbound::Endpoint`.
             let endpoint_router = client_stack
-                .push(tap_layer)
-                .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                .serves::<Endpoint>()
-                .push(trace::layer(
-                    |endpoint: &Endpoint| info_span!("endpoint", peer.addr = %endpoint.addr),
-                ))
+                // .push(tap_layer)
+                // .push(metrics.http_endpoint.into_layer::<classify::Response>())
+                // .serves::<Endpoint>()
+                // .push(trace::layer(
+                //     |endpoint: &Endpoint| info_span!("endpoint", peer.addr = %endpoint.addr),
+                // ))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .makes::<Endpoint>()
                 .push(router::Layer::new(
@@ -140,32 +141,34 @@ impl<A: OrigDstAddr> Config<A> {
                 .into_inner()
                 .spawn();
 
-            // A per-`dst::Route` layer that uses profile data to configure
-            // a per-route layer.
-            //
-            // The `classify` module installs a `classify::Response`
-            // extension into each request so that all lower metrics
-            // implementations can use the route-specific configuration.
-            let dst_route_layer = svc::layers()
-                .push(insert::target::layer())
-                .push(metrics.http_route.into_layer::<classify::Response>())
-                .push(classify::Layer::new())
-                .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract);
+            // // A per-`dst::Route` layer that uses profile data to configure
+            // // a per-route layer.
+            // //
+            // // The `classify` module installs a `classify::Response`
+            // // extension into each request so that all lower metrics
+            // // implementations can use the route-specific configuration.
+            // let dst_route_layer = svc::layers()
+            //     .push(insert::target::layer())
+            //     .push(metrics.http_route.into_layer::<classify::Response>())
+            //     .push(classify::Layer::new())
+            //     .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract);
 
-            // A per-`DstAddr` stack that does the following:
-            //
-            // 1. Determines the profile of the destination and applies
-            //    per-route policy.
-            // 2. Annotates the request with the `DstAddr` so that
-            //    `RecognizeEndpoint` can use the value.
-            let dst_stack = svc::stack(svc::Shared::new(endpoint_router))
-                .push(insert::target::layer())
-                .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
-                .push(profiles::router::layer(profiles_client, dst_route_layer))
-                .push(strip_header::request::layer(DST_OVERRIDE_HEADER))
-                .push(trace::layer(
-                    |dst: &DstAddr| info_span!("logical", dst = %dst.dst_logical()),
-                ));
+            // // A per-`DstAddr` stack that does the following:
+            // //
+            // // 1. Determines the profile of the destination and applies
+            // //    per-route policy.
+            // // 2. Annotates the request with the `DstAddr` so that
+            // //    `RecognizeEndpoint` can use the value.
+            // let dst_stack = svc::stack(svc::Shared::new(endpoint_router))
+            //     .push(insert::target::layer())
+            //     .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
+            //     .push(profiles::router::layer(profiles_client, dst_route_layer))
+            //     .push(strip_header::request::layer(DST_OVERRIDE_HEADER))
+            //     .push(trace::layer(
+            //         |dst: &DstAddr| info_span!("logical", dst = %dst.dst_logical()),
+            //     ));
+            let dst_stack =
+                svc::stack(svc::Shared::new(endpoint_router)).push(insert::target::layer());
 
             // Routes requests to a `DstAddr`.
             //
@@ -222,11 +225,12 @@ impl<A: OrigDstAddr> Config<A> {
                 .into_inner()
                 .spawn();
 
-            // Share a single semaphore across all requests to signal when
-            // the proxy is overloaded.
-            let admission_control = svc::stack(dst_router)
-                .push_concurrency_limit(buffer.max_in_flight)
-                .push_load_shed();
+            // // Share a single semaphore across all requests to signal when
+            // // the proxy is overloaded.
+            // let admission_control = svc::stack(dst_router)
+            //     .push_concurrency_limit(buffer.max_in_flight)
+            //     .push_load_shed();
+            let admission_control = dst_router;
 
             // As HTTP requests are accepted, the `tls::accept::Meta` connection
             // metadata is stored on each request's extensions.
@@ -237,28 +241,28 @@ impl<A: OrigDstAddr> Config<A> {
             let source_stack = svc::stack(svc::Shared::new(admission_control))
                 .serves::<tls::accept::Meta>()
                 .push(orig_proto_downgrade::layer())
-                .push(insert::target::layer())
-                // disabled due to information leagkage
-                //.push(set_remote_ip_on_req::layer())
-                //.push(set_client_id_on_req::layer())
-                .push(strip_header::request::layer(L5D_REMOTE_IP))
-                .push(strip_header::request::layer(L5D_CLIENT_ID))
-                .push(strip_header::response::layer(L5D_SERVER_ID))
-                .push(insert::layer(move || {
-                    DispatchDeadline::after(buffer.dispatch_timeout)
-                }))
-                .push_per_make(errors::layer())
-                .push(trace::layer(|src: &tls::accept::Meta| {
-                    info_span!(
-                        "source",
-                        peer.id = ?src.peer_identity,
-                        target.addr = %src.addrs.target_addr(),
-                    )
-                }))
-                .push(trace_context::layer(span_sink.map(|span_sink| {
-                    SpanConverter::server(span_sink, trace_labels())
-                })))
-                .push(metrics.http_handle_time.layer())
+                // .push(insert::target::layer())
+                // // disabled due to information leagkage
+                // //.push(set_remote_ip_on_req::layer())
+                // //.push(set_client_id_on_req::layer())
+                // .push(strip_header::request::layer(L5D_REMOTE_IP))
+                // .push(strip_header::request::layer(L5D_CLIENT_ID))
+                // .push(strip_header::response::layer(L5D_SERVER_ID))
+                // .push(insert::layer(move || {
+                //     DispatchDeadline::after(buffer.dispatch_timeout)
+                // }))
+                // .push_per_make(errors::layer())
+                // .push(trace::layer(|src: &tls::accept::Meta| {
+                //     info_span!(
+                //         "source",
+                //         peer.id = ?src.peer_identity,
+                //         target.addr = %src.addrs.target_addr(),
+                //     )
+                // }))
+                // .push(trace_context::layer(span_sink.map(|span_sink| {
+                //     SpanConverter::server(span_sink, trace_labels())
+                // })))
+                // .push(metrics.http_handle_time.layer())
                 .serves::<tls::accept::Meta>();
 
             let forward_tcp = tcp::Forward::new(

@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use crate::{
     drain,
     proxy::{
@@ -137,7 +139,8 @@ where
 impl<L, F, H, B> Service<Connection> for Server<L, F, H, B>
 where
     L: TransportLabels<Protocol, Labels = TransportKey>,
-    F: Accept<(tls::accept::Meta, transport::metrics::Io<BoxedIo>)> + Clone + Send + 'static,
+    // F: Accept<(tls::accept::Meta, transport::metrics::Io<BoxedIo>)> + Clone + Send + 'static,
+    F: Accept<(tls::accept::Meta, BoxedIo)> + Clone + Send + 'static,
     F::Future: Send + 'static,
     H: MakeService<
             tls::accept::Meta,
@@ -168,11 +171,11 @@ where
     /// will be mapped into respective services, and spawned into an
     /// executor.
     fn call(&mut self, (proto, io): Connection) -> Self::Future {
-        // TODO move this into a distinct Accept?
-        let io = {
-            let labels = self.transport_labels.transport_labels(&proto);
-            self.transport_metrics.wrap_server_transport(labels, io)
-        };
+        // // TODO move this into a distinct Accept?
+        // let io = {
+        //     let labels = self.transport_labels.transport_labels(&proto);
+        //     self.transport_metrics.wrap_server_transport(labels, io)
+        // };
 
         let drain = self.drain.clone();
         let http_version = match proto.http {
