@@ -56,3 +56,4 @@ debug = false
 webpki = { git = "https://github.com/seanmonstar/webpki", branch = "cert-dns-names-0.21" }
 # backport danburkert/prost#268 to `prost` 0.5 temporarily.
 prost = { git = "https://github.com/linkerd/prost", branch = "v0.5.x" }
+sharded-slab = { git = "https://github.com/hawkw/sharded-slab", branch = "eliza/fix-free-list" }

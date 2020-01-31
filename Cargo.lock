@@ -743,7 +743,7 @@ dependencies = [
 name = "linkerd2-app-profiling"
 version = "0.1.0"
 dependencies = [
- "linkerd2-app-integration 0.1.0",
+ "linkerd2-app-integration",
 ]
 
 [[package]]
@@ -1908,8 +1908,7 @@ dependencies = [
 [[package]]
 name = "sharded-slab"
 version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ee8b66dea1777ef2c5f33ffeb90fd54afe43bb5c97bdaf82b521ad7c90a395"
+source = "git+https://github.com/hawkw/sharded-slab?branch=eliza/fix-free-list#2e90199894830e990a0951773234fe3be4ac9e6a"
 dependencies = [
  "lazy_static",
 ]
