@@ -1,9 +1,11 @@
-//! Layer to map service errors into responss
+//! Layer to map service errors into responses.
+
+#![deny(warnings, rust_2018_idioms)]
 
 use futures::{Async, Future, Poll};
 use linkerd2_error::Error;
 
-/// Creates an error responder for a requst.
+/// Creates an error responder for a request.
 pub trait NewRespond<Req, E = Error> {
     type Response;
     type Respond: Respond<E, Response = Self::Response>;
