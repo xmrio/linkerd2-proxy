@@ -1,0 +1,38 @@
+version: "3.7"
+services:
+  iperf:
+    build:
+      context: .
+      dockerfile: Dockerfile-iperf
+    command: ["iperf", "-s", "-p 5001"]
+
+  proxy:
+    build:
+      context: ..
+      dockerfile: profiling/Dockerfile-proxy
+    environment:
+      PROFILING_SUPPORT_SERVER: "${SERVER}"
+      LINKERD2_PROXY_LOG: "${LINKERD2_PROXY_LOG}"
+      PROXY_PERF:
+      NAME:
+      ID:
+    command: /usr/bin/run-proxy
+    depends_on:
+      - iperf
+      - fortio
+    security_opt:
+      - seccomp:./seccomp-perf.json
+    volumes:
+      - type: bind
+        source: "."
+        target: "/out"
+
+  fortio:
+    build:
+      context: .
+      dockerfile: Dockerfile-fortio
+    command: ["fortio", "server"]
+    volumes:
+      - type: bind
+        source: "."
+        target: "/out"
