@@ -99,12 +99,10 @@ clean-package:
 	rm -rf $(PKG_ROOT)
 
 .PHONY: clean-profile
-clean-package:
-	rm -rf $(PROFILING)/perf.data
-	rm -rf $(PROFILING)/*png
-	rm -rf $(PROFILING)/memory-profiler-*
-	rm -rf $(PROFILING)/libmemory_profiler.so
+clean-profile:
 	rm -rf $(TARGET)/release/profile*
+	rm -rf $(TARGET)/profile/*
+
 
 .PHONY: docker
 docker: Dockerfile Cargo.lock
