@@ -211,6 +211,10 @@ impl DstSender {
     pub fn send_h2_hinted(&self, addr: SocketAddr) {
         self.send(destination_add_hinted(addr, Hint::H2));
     }
+
+    pub fn send_no_endpoints(&self) {
+        self.send(destination_exists_with_no_endpoints())
+    }
 }
 
 impl Stream for ProfileReceiver {

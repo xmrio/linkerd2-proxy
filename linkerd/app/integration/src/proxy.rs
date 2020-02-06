@@ -153,17 +153,17 @@ struct DstInner {
 
 impl app::core::transport::OrigDstAddr for MockOriginalDst {
     fn orig_dst_addr(&self, sock: &tokio::net::TcpStream) -> Option<SocketAddr> {
-        info_span!("mock original dst").in_scope(|| {
+        info_span!("mock-original-dst").in_scope(|| {
             sock.local_addr().ok().and_then(|local| {
                 let inner = self.0.lock().unwrap();
-                if inner.inbound_local_addr == Some(local) {
+                if inner.inbound_local_addr.as_ref().map(SocketAddr::port) == Some(local.port()) {
                     debug!(local = %local, mock = ?inner.inbound_orig_addr, "inbound");
                     inner.inbound_orig_addr
-                } else if inner.outbound_local_addr == Some(local) {
+                } else if inner.outbound_local_addr.as_ref().map(SocketAddr::port) == Some(local.port()) {
                     debug!(local = %local, mock = ?inner.outbound_orig_addr, "outbound");
                     inner.outbound_orig_addr
                 } else {
-                    debug!(local = %local, "failed");
+                    debug!(local = %local, outbound = ?inner.outbound_local_addr, inbound = ?inner.inbound_local_addr, "failed");
                     None
                 }
             })
