@@ -195,7 +195,7 @@ impl<A: OrigDstAddr> Config<A> {
             // to the application-selected original destination.
 
             // Builds a balancer for each concrete destination.
-            let http_balancer_cache = http_endpoint
+            let http_balancer = http_endpoint
                 .clone()
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
                 .push(
@@ -214,24 +214,26 @@ impl<A: OrigDstAddr> Config<A> {
                 // Shares the balancer, ensuring discovery errors are propagated.
                 .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
                 .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
-                .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
+            let http_balancer_cache = info_span!("balance")
+                .in_scope(|| http_balancer.spawn_cache(cache_capacity, cache_max_idle_age));
 
             // Caches clients that bypass discovery/balancing.
             //
             // This is effectively the same as the endpoint stack; but the
             // client layer captures the requst body type (via PhantomData), so
             // the stack cannot be shared directly.
-            let http_forward_cache = http_endpoint
+            let http_forward = http_endpoint
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
                 .push_per_service(http::box_request::Layer::new())
                 .push_pending()
                 .push_per_service(svc::layers().push_lock())
                 .push_per_service(metrics.stack.new_layer(stack_labels("forward.endpoint")))
-                .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
-                })
+                });
+            let http_forward_cache = info_span!("forward")
+                .in_scope(|| http_forward.spawn_cache(cache_capacity, cache_max_idle_age))
                 .push_map_target(|t: Concrete<HttpEndpoint>| Target {
                     addr: t.addr.into(),
                     inner: t.inner.inner,
@@ -272,7 +274,7 @@ impl<A: OrigDstAddr> Config<A> {
             // Routes `Logical` targets to a cached `Profile` stack, i.e. so
             // that profile resolutions are shared even as the type of request
             // may vary.
-            let http_logical_profile_cache = http_concrete
+            let http_profile = http_concrete
                 .clone()
                 .push_per_service(http::box_request::Layer::new())
                 .check_service::<Concrete<HttpEndpoint>>()
@@ -295,8 +297,10 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_pending()
                 .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
                 .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
-                .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push_trace(|_: &Profile| info_span!("profile"))
+                .push_trace(|_: &Profile| info_span!("profile"));
+
+            let http_logical_profile_cache = info_span!("profile")
+                .in_scope(|| http_profile.spawn_cache(cache_capacity, cache_max_idle_age))
                 .check_service::<Profile>()
                 .push(router::Layer::new(|()| ProfilePerTarget))
                 .check_new_service_routes::<(), Logical<HttpEndpoint>>()
@@ -306,11 +310,12 @@ impl<A: OrigDstAddr> Config<A> {
             //
             // For example, a client may send requests to `foo` or `foo.ns`; and
             // the canonical form of these names is `foo.ns.svc.cluster.local
-            let dns_refine_cache = svc::stack(dns_resolver.into_make_refine())
+            let dns_refine = svc::stack(dns_resolver.into_make_refine())
                 .push_per_service(svc::lock::Layer::default())
                 .push_per_service(metrics.stack.new_layer(stack_labels("canonicalize")))
-                .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push_trace(|name: &dns::Name| info_span!("canonicalize", %name))
+                .push_trace(|name: &dns::Name| info_span!("canonicalize", %name));
+            let dns_refine_cache = info_span!("canonicalize")
+                .in_scope(|| dns_refine.spawn_cache(cache_capacity, cache_max_idle_age))
                 // Obtains the lock, advances the state of the resolution
                 .push(svc::make_response::Layer)
                 // Ensures that the cache isn't locked when polling readiness.

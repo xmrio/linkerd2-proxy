@@ -74,6 +74,7 @@ impl<S, E: From<Error> + Clone> tower::layer::Layer<S> for Layer<E> {
 
 impl<S, E> Clone for Lock<S, E> {
     fn clone(&self) -> Self {
+        trace!(locked = %self.locked.is_some(), "Cloning");
         Self {
             locked: None,
             lock: self.lock.clone(),
@@ -134,8 +135,9 @@ where
                 }
                 Async::Ready(locked) => {
                     if let State::Error(ref e) = *locked {
-                        trace!(error = %e, "poll_ready");
-                        return Err(e.clone().into());
+                        let error = e.clone().into();
+                        trace!(%error, "poll_ready");
+                        return Err(error);
                     }
 
                     trace!(acquired = true, "poll_ready");
