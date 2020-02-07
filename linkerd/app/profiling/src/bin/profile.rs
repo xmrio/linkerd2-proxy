@@ -27,9 +27,10 @@ fn main() {
     let srv2 = server::mock_listening(addr.clone());
 
     let ctrl = controller::new_unordered();
-    let _fwd_profile = ctrl.profile_tx_default("transparency.test.svc.cluster.local");
-    let fwd_dst = ctrl.destination_tx("transparency.test.svc.cluster.local");
-    fwd_dst.send_addr(srv.addr);
+
+    // let _fwd_profile = ctrl.profile_tx_default("transparency.test.svc.cluster.local");
+    // let fwd_dst = ctrl.destination_tx("transparency.test.svc.cluster.local");
+    // fwd_dst.send_addr(srv.addr);
 
     let _empty_profile = ctrl.profile_tx_default("empty.test.svc.cluster.local");
     let empty_dst = ctrl.destination_tx("empty.test.svc.cluster.local");

@@ -81,6 +81,12 @@ impl<S, E> Clone for Lock<S, E> {
     }
 }
 
+impl<S, E> Drop for Lock<S, E> {
+    fn drop(&mut self) {
+        trace!(locked = %self.locked.is_some(), "Dropping");
+    }
+}
+
 impl<T, S, E> tower::Service<T> for Lock<S, E>
 where
     S: tower::Service<T>,
@@ -98,7 +104,7 @@ where
                 if let State::Service(ref mut inner) = **state {
                     return match inner.poll_ready() {
                         Ok(ok) => {
-                            trace!(ready = ok.is_ready(), "service");
+                            trace!(ready = ok.is_ready(), "service poll_ready");
                             Ok(ok)
                         }
                         Err(inner) => {
@@ -122,16 +128,17 @@ where
             // driven to readiness.
             match self.lock.poll_lock() {
                 Async::NotReady => {
-                    trace!(locked = false);
-                    let _ = std::panic::catch_unwind(|| panic!("locked"));
+                    trace!(acquired = false, "poll_ready");
+                    //let _ = std::panic::catch_unwind(|| panic!("locked"));
                     return Ok(Async::NotReady);
                 }
                 Async::Ready(locked) => {
                     if let State::Error(ref e) = *locked {
+                        trace!(error = %e, "poll_ready");
                         return Err(e.clone().into());
                     }
 
-                    trace!(locked = true);
+                    trace!(acquired = true, "poll_ready");
                     self.locked = Some(locked);
                 }
             }
