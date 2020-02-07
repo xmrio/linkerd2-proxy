@@ -123,6 +123,7 @@ where
             match self.lock.poll_lock() {
                 Async::NotReady => {
                     trace!(locked = false);
+                    let _ = std::panic::catch_unwind(|| panic!("locked"));
                     return Ok(Async::NotReady);
                 }
                 Async::Ready(locked) => {

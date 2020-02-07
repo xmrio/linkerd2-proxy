@@ -78,15 +78,22 @@ where
             *self = match self {
                 MakeReadyFuture::Making(ref mut fut) => {
                     let svc = try_ready!(fut.poll().map_err(Into::into));
-                    trace!("made; awaiting readiness");
+                    trace!("Made service");
                     MakeReadyFuture::Ready(Ready::new(svc))
                 }
                 MakeReadyFuture::Ready(ref mut fut) => {
+                    trace!("Awaiting readiness");
                     let ready = fut.poll().map_err(Into::into)?;
                     trace!(ready = ready.is_ready());
                     return Ok(ready);
                 }
             }
         }
+    }
+}
+
+impl<F, S, Req> Drop for MakeReadyFuture<F, S, Req> {
+    fn drop(&mut self) {
+        trace!("Dropping")
     }
 }
