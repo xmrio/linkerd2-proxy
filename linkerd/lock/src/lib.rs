@@ -134,8 +134,9 @@ where
                 }
                 Async::Ready(locked) => {
                     if let State::Error(ref e) = *locked {
-                        trace!(error = %e, "poll_ready");
-                        return Err(e.clone().into());
+                        let error = e.clone().into();
+                        trace!(%error, "poll_ready");
+                        return Err(error);
                     }
 
                     trace!(acquired = true, "poll_ready");
