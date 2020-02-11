@@ -95,6 +95,7 @@ where
         let mut cache = self.lock.take().expect("not ready");
 
         if let Some(service) = cache.access(&target) {
+            trace!("target already exists in cache");
             return future::ok(service.clone().into());
         }
 

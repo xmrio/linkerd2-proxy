@@ -105,17 +105,19 @@ where
                 if let State::Service(ref mut inner) = **state {
                     return match inner.poll_ready() {
                         Ok(ok) => {
-                            trace!(ready = ok.is_ready(), "service poll_ready");
+                            trace!(acquired = true, ready = ok.is_ready(), "poll_ready");
                             Ok(ok)
                         }
                         Err(inner) => {
                             // Coerce the error into `E` and clone it into the
                             // locked state so that it can be returned from all
                             // clones of the lock.
-                            let err = E::from(inner.into());
-                            **state = State::Error(err.clone());
+                            let error = inner.into();
+                            trace!(%error, "poll_ready");
+                            let e = E::from(error);
+                            **state = State::Error(e.clone());
                             self.locked = None;
-                            Err(err.into())
+                            Err(e.into())
                         }
                     };
                 }
@@ -140,7 +142,6 @@ where
                         return Err(error);
                     }
 
-                    trace!(acquired = true, "poll_ready");
                     self.locked = Some(locked);
                 }
             }
@@ -150,6 +151,7 @@ where
     fn call(&mut self, t: T) -> Self::Future {
         if let Some(mut state) = self.locked.take() {
             if let State::Service(ref mut inner) = *state {
+                trace!("call");
                 return inner.call(t).map_err(Into::into);
             }
         }

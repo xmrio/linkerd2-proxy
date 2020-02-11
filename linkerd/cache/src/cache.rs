@@ -78,8 +78,6 @@ where
     pub fn access(&mut self, key: &K) -> Option<&mut V> {
         if let Some(node) = self.values.get_mut(key) {
             self.expirations.reset(&node.dq_key, self.expires);
-            trace!("reset expiration for cache value associated with key");
-
             return Some(&mut node.value);
         }
 
@@ -92,7 +90,6 @@ where
     /// `expires` span of time.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let node = {
-            trace!("inserting an item into the cache");
             let dq_key = self.expirations.insert(key.clone(), self.expires);
             Node { dq_key, value }
         };
