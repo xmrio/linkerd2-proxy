@@ -2297,9 +2297,8 @@ dependencies = [
 
 [[package]]
 name = "tokio-sync"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2162248ff317e2bc713b261f242b69dbb838b85248ed20bb21df56d60ea4cae7"
+version = "0.1.8"
+source = "git+https://github.com/tokio-rs/tokio?branch=eliza/0.2-semaphore#0203840fa869cc12a5706a42f8f1d84814155843"
 dependencies = [
  "fnv",
  "futures",
@@ -2492,15 +2491,16 @@ dependencies = [
 
 [[package]]
 name = "tower-limit"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d3d0fe82c2373225025d50881794e0792e544df9752dec66288b644b40fbfe"
+checksum = "2d990c5b6c0e4e192db8cf3dacaafefe1278962d0ec45dc84421175db32d33f0"
 dependencies = [
  "futures",
  "tokio-sync",
  "tokio-timer",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
