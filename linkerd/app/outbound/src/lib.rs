@@ -212,8 +212,11 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(metrics.stack.new_layer(stack_labels("balance.make")))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
-                .push_per_service(svc::lock::Layer::new())
-                .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("balance"))),
+                )
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
             let http_balancer_cache = info_span!("balance")
                 .in_scope(|| http_balancer.spawn_cache(cache_capacity, cache_max_idle_age));
@@ -295,8 +298,11 @@ impl<A: OrigDstAddr> Config<A> {
                     },
                 ))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::new())
-                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("profile"))),
+                )
                 .push_trace(|_: &Profile| info_span!("profile"));
 
             let http_logical_profile_cache = info_span!("profile")
@@ -311,8 +317,11 @@ impl<A: OrigDstAddr> Config<A> {
             // For example, a client may send requests to `foo` or `foo.ns`; and
             // the canonical form of these names is `foo.ns.svc.cluster.local
             let dns_refine = svc::stack(dns_resolver.into_make_refine())
-                .push_per_service(svc::lock::Layer::default())
-                .push_per_service(metrics.stack.new_layer(stack_labels("canonicalize")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("canonicalize"))),
+                )
                 .push_trace(|name: &dns::Name| info_span!("canonicalize", %name));
             let dns_refine_cache = info_span!("canonicalize")
                 .in_scope(|| dns_refine.spawn_cache(cache_capacity, cache_max_idle_age))
@@ -495,10 +504,8 @@ fn is_discovery_rejected(err: &Error) -> bool {
         return true;
     }
 
-    if let Some(lock) = err.downcast_ref::<svc::lock::LockError>() {
-        if let Some(inner) = lock.inner() {
-            return is_discovery_rejected(&*inner);
-        }
+    if let Some(lock) = err.downcast_ref::<svc::lock::error::ServiceError>() {
+        return is_discovery_rejected(lock.inner());
     }
 
     false

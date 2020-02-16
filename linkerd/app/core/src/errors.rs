@@ -86,7 +86,7 @@ impl<B: Default> respond::Respond for Respond<B> {
                     .header(http::header::CONTENT_LENGTH, "0")
                     .body(B::default())
                     .expect("app::errors response is valid");
-                let code = set_grpc_status(error, rsp.headers_mut());
+                let code = set_grpc_status(&error, rsp.headers_mut());
                 debug!(?code, "Handling error with gRPC status");
                 return Ok(rsp);
             }
@@ -97,7 +97,7 @@ impl<B: Default> respond::Respond for Respond<B> {
             Respond::Http2 { .. } => http::Version::HTTP_2,
         };
 
-        let status = http_status(error);
+        let status = http_status(&error);
         debug!(%status, ?version, "Handling error with HTTP response");
         Ok(http::Response::builder()
             .version(version)
@@ -108,7 +108,7 @@ impl<B: Default> respond::Respond for Respond<B> {
     }
 }
 
-fn http_status(error: Error) -> StatusCode {
+fn http_status(error: &Error) -> StatusCode {
     if error.is::<cache::NoCapacity>() {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<shed::Overloaded>() {
@@ -122,7 +122,7 @@ fn http_status(error: Error) -> StatusCode {
     }
 }
 
-fn set_grpc_status(error: Error, headers: &mut http::HeaderMap) {
+fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) {
     const GRPC_STATUS: &'static str = "grpc-status";
     const GRPC_MESSAGE: &'static str = "grpc-message";
 

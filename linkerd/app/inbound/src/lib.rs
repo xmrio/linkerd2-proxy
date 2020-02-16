@@ -116,8 +116,11 @@ impl<A: OrigDstAddr> Config<A> {
                 }))
                 .push(metrics.stack.new_layer(stack_labels("endpoint.make")))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::default())
-                .push_per_service(metrics.stack.new_layer(stack_labels("endpoint")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("endpoint"))),
+                )
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|ep: &HttpEndpoint| {
                     info_span!(
@@ -158,8 +161,11 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(http_target_observability)
                 .push(metrics.stack.new_layer(stack_labels("target.make")))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::default())
-                .push_per_service(metrics.stack.new_layer(stack_labels("target")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("target"))),
+                )
                 .check_new_clone_service::<Target>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|_: &Target| info_span!("target"))
@@ -178,8 +184,11 @@ impl<A: OrigDstAddr> Config<A> {
                 ))
                 .push(metrics.stack.new_layer(stack_labels("profile.make")))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::default())
-                .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
+                .push_per_service(
+                    svc::layers()
+                        .push_lock()
+                        .push(metrics.stack.new_layer(stack_labels("profile"))),
+                )
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)

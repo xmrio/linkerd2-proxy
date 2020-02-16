@@ -57,7 +57,7 @@ impl Config {
                     .push_per_service(proxy::grpc::req_body_as_payload::layer())
                     .push(control::add_origin::Layer::new())
                     .push_pending()
-                    .push_per_service(svc::lock::Layer::default())
+                    .push_per_service(svc::layers().push_lock())
                     .into_inner()
                     .new_service(addr.clone());
 
