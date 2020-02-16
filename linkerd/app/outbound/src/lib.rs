@@ -212,7 +212,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(metrics.stack.new_layer(stack_labels("balance.make")))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
-                .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
+                .push_per_service(svc::lock::Layer::new())
                 .push_per_service(metrics.stack.new_layer(stack_labels("balance")))
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
             let http_balancer_cache = info_span!("balance")
@@ -251,7 +251,7 @@ impl<A: OrigDstAddr> Config<A> {
                             .push_per_service(svc::layers().boxed_http_response())
                             .into_inner(),
                     )
-                    .with_predicate(DiscoveryError::is_discovery_rejected),
+                    .with_predicate(is_discovery_rejected),
                 )
                 .check_service::<Concrete<HttpEndpoint>>();
 
@@ -295,7 +295,7 @@ impl<A: OrigDstAddr> Config<A> {
                     },
                 ))
                 .push_pending()
-                .push_per_service(svc::lock::Layer::new::<DiscoveryError>())
+                .push_per_service(svc::lock::Layer::new())
                 .push_per_service(metrics.stack.new_layer(stack_labels("profile")))
                 .push_trace(|_: &Profile| info_span!("profile"));
 
@@ -341,7 +341,7 @@ impl<A: OrigDstAddr> Config<A> {
                             .check_service::<Logical<HttpEndpoint>>()
                             .into_inner(),
                     )
-                    .with_predicate(DiscoveryError::is_discovery_rejected),
+                    .with_predicate(is_discovery_rejected),
                 )
                 .check_service::<Logical<HttpEndpoint>>()
                 // Sets the canonical-dst header on all outbound requests.
@@ -488,13 +488,18 @@ impl From<Error> for DiscoveryError {
     }
 }
 
-impl DiscoveryError {
-    fn is_discovery_rejected(err: &Error) -> bool {
-        tracing::trace!(?err, "is_discovery_rejected");
-        if let Some(DiscoveryError::DiscoveryRejected) = err.downcast_ref::<DiscoveryError>() {
-            return true;
-        }
+fn is_discovery_rejected(err: &Error) -> bool {
+    tracing::trace!(?err, "is_discovery_rejected");
 
-        false
+    if err.is::<DiscoveryRejected>() || err.is::<profiles::InvalidProfileAddr>() {
+        return true;
     }
+
+    if let Some(lock) = err.downcast_ref::<svc::lock::LockError>() {
+        if let Some(inner) = lock.inner() {
+            return is_discovery_rejected(&*inner);
+        }
+    }
+
+    false
 }

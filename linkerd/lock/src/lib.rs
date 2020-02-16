@@ -2,15 +2,14 @@
 
 #![deny(warnings, rust_2018_idioms)]
 
-use futures::{future, Async, Future, Poll};
+use futures::task::AtomicTask;
+use futures::{Async, Future, Poll};
 use linkerd2_error::Error;
-use tokio::sync::lock;
+use std::sync::{Arc, Mutex, Weak};
 use tracing::trace;
 
-#[derive(Clone, Debug)]
-pub struct Layer<E = Poisoned> {
-    _marker: std::marker::PhantomData<E>,
-}
+#[derive(Clone, Debug, Default)]
+pub struct Layer(());
 
 /// Guards access to an inner service with a `tokio::sync::lock::Lock`.
 ///
@@ -22,163 +21,267 @@ pub struct Layer<E = Poisoned> {
 /// that the error may be returned to all clones of the lock. By default, errors
 /// are propagated through the `Poisoned` type, but they may be propagated
 /// through custom types as well.
-pub struct Lock<S, E = Poisoned> {
-    lock: lock::Lock<State<S, E>>,
-    locked: Option<lock::LockGuard<State<S, E>>>,
+pub struct Lock<S> {
+    state: LockState<S>,
+    shared: Arc<Mutex<Shared<S>>>,
+    task: Arc<AtomicTask>,
 }
 
-/// The lock holds either an inner service or, if it failed, an error salvaged
-/// from the failure.
-enum State<S, E> {
-    Service(S),
-    Error(E),
-}
-
-/// A default error type that propagates the inner service's error message to
-/// consumers.
 #[derive(Clone, Debug)]
-pub struct Poisoned(String);
+pub enum LockError {
+    Inner(Arc<Error>),
+    Poisoned,
+}
+
+enum LockState<S> {
+    Released,
+    Waiting,
+    Acquired(S),
+    Failed(Arc<Error>),
+}
+
+struct Shared<S> {
+    state: SharedState<S>,
+    waiters: Vec<Weak<AtomicTask>>,
+}
+
+enum SharedState<S> {
+    /// A Lock is holding the service.
+    Acquired,
+
+    /// The inner service is available.
+    Available(S),
+
+    /// The lock has failed.
+    Failed(Arc<Error>),
+}
 
 // === impl Layer ===
 
-impl Default for Layer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Layer {
     /// Sets the error type to be returned to consumers when poll_ready fails.
-    pub fn new<E>() -> Layer<E>
-    where
-        E: Clone + From<Error> + Into<Error>,
-    {
-        Layer {
-            _marker: std::marker::PhantomData,
-        }
+    pub fn new() -> Layer {
+        Layer(())
     }
 }
 
-impl<S, E: From<Error> + Clone> tower::layer::Layer<S> for Layer<E> {
-    type Service = Lock<S, E>;
+impl<S> tower::layer::Layer<S> for Layer {
+    type Service = Lock<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Self::Service {
-            lock: lock::Lock::new(State::Service(inner)),
-            locked: None,
-        }
+        Self::Service::new(inner)
     }
 }
 
 // === impl Lock ===
 
-impl<S, E> Clone for Lock<S, E> {
-    fn clone(&self) -> Self {
-        trace!(locked = %self.locked.is_some(), "Cloning");
+impl<S> Lock<S> {
+    pub fn new(service: S) -> Self {
         Self {
-            locked: None,
-            lock: self.lock.clone(),
+            state: LockState::Released,
+            task: Arc::new(AtomicTask::new()),
+            shared: Arc::new(Mutex::new(Shared {
+                waiters: Vec::new(),
+                state: SharedState::Available(service),
+            })),
         }
     }
 }
 
-impl<S, E> Drop for Lock<S, E> {
-    fn drop(&mut self) {
-        trace!(locked = %self.locked.is_some(), "Dropping");
+impl<S> Clone for Lock<S> {
+    fn clone(&self) -> Self {
+        Self {
+            state: LockState::Released,
+            shared: self.shared.clone(),
+            task: Arc::new(AtomicTask::new()),
+        }
     }
 }
 
-impl<T, S, E> tower::Service<T> for Lock<S, E>
+impl<S> Drop for Lock<S> {
+    fn drop(&mut self) {
+        let state = std::mem::replace(&mut self.state, LockState::Released);
+        if let LockState::Acquired(service) = state {
+            if let Ok(mut shared) = self.shared.lock() {
+                shared.release(service);
+            }
+        }
+    }
+}
+
+impl<T, S> tower::Service<T> for Lock<S>
 where
     S: tower::Service<T>,
     S::Error: Into<Error>,
-    E: Clone + From<Error> + Into<Error>,
 {
     type Response = S::Response;
-    type Error = Error;
-    type Future = future::MapErr<S::Future, fn(S::Error) -> Error>;
+    type Error = LockError;
+    type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         loop {
-            if let Some(state) = self.locked.as_mut() {
-                // Drive the service to readiness if it is already locked.
-                if let State::Service(ref mut inner) = **state {
-                    return match inner.poll_ready() {
-                        Ok(ok) => {
-                            trace!(acquired = true, ready = ok.is_ready(), "poll_ready");
-                            Ok(ok)
-                        }
-                        Err(inner) => {
-                            // Coerce the error into `E` and clone it into the
-                            // locked state so that it can be returned from all
-                            // clones of the lock.
-                            let error = inner.into();
-                            trace!(%error, "poll_ready");
-                            let e = E::from(error);
-                            **state = State::Error(e.clone());
-                            self.locked = None;
-                            Err(e.into())
-                        }
-                    };
-                }
-
-                // If an error occured above,the locked state is dropped and
-                // cannot be acquired again.
-                unreachable!("must not lock on error");
-            }
-
-            // Acquire the inner service exclusively so that the service can be
-            // driven to readiness.
-            match self.lock.poll_lock() {
-                Async::NotReady => {
-                    trace!(acquired = false, "poll_ready");
-                    //let _ = std::panic::catch_unwind(|| panic!("locked"));
-                    return Ok(Async::NotReady);
-                }
-                Async::Ready(locked) => {
-                    if let State::Error(ref e) = *locked {
-                        let error = e.clone().into();
-                        trace!(%error, "poll_ready");
-                        return Err(error);
+            self.state = match self.state {
+                LockState::Acquired(ref mut svc) => match svc.poll_ready() {
+                    Ok(ok) => {
+                        trace!(acquired = true, ready = ok.is_ready(), "poll_ready");
+                        return Ok(ok);
                     }
+                    Err(inner) => {
+                        let error = Arc::new(inner.into());
+                        trace!(%error, "poll_ready");
+                        if let Ok(mut shared) = self.shared.lock() {
+                            shared.fail(error.clone());
+                        }
+                        LockState::Failed(error)
+                    }
+                },
 
-                    self.locked = Some(locked);
+                LockState::Released => {
+                    // Acquire the inner service exclusively so that the service can be
+                    // driven to readiness.
+                    match self.shared.lock() {
+                        Err(_) => return Err(LockError::Poisoned),
+                        Ok(mut shared) => {
+                            match std::mem::replace(&mut shared.state, SharedState::Acquired) {
+                                SharedState::Available(svc) => LockState::Acquired(svc),
+                                SharedState::Acquired => {
+                                    self.task.register();
+                                    shared.waiters.push(Arc::downgrade(&self.task));
+                                    LockState::Waiting
+                                }
+                                SharedState::Failed(error) => {
+                                    shared.state = SharedState::Failed(error.clone());
+                                    LockState::Failed(error)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                LockState::Waiting => {
+                    trace!("waiting");
+                    match self.shared.lock() {
+                        Err(_) => return Err(LockError::Poisoned),
+                        Ok(mut shared) => {
+                            match std::mem::replace(&mut shared.state, SharedState::Acquired) {
+                                SharedState::Acquired => {
+                                    self.task.register();
+                                    return Ok(Async::NotReady);
+                                }
+                                SharedState::Available(svc) => LockState::Acquired(svc),
+                                SharedState::Failed(error) => {
+                                    shared.state = SharedState::Failed(error.clone());
+                                    LockState::Failed(error)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                LockState::Failed(ref err) => {
+                    return Err(LockError::Inner(err.clone()));
                 }
             }
         }
     }
 
-    fn call(&mut self, t: T) -> Self::Future {
-        if let Some(mut state) = self.locked.take() {
-            if let State::Service(ref mut inner) = *state {
-                trace!("call");
-                return inner.call(t).map_err(Into::into);
-            }
+    fn call(&mut self, req: T) -> Self::Future {
+        let mut svc = match std::mem::replace(&mut self.state, LockState::Released) {
+            LockState::Acquired(svc) => svc,
+            _ => panic!("called before ready"),
+        };
+
+        trace!("call");
+        let fut = ResponseFuture(svc.call(req));
+
+        if let Ok(mut shared) = self.shared.lock() {
+            shared.release(svc);
         }
 
-        unreachable!("called before ready");
+        fut
     }
 }
 
-// === impl Poisoned ===
+pub struct ResponseFuture<F>(F);
 
-impl From<Error> for Poisoned {
-    fn from(e: Error) -> Self {
-        Poisoned(e.to_string())
+impl<F> Future for ResponseFuture<F>
+where
+    F: Future,
+    F::Error: Into<Error>,
+{
+    type Item = F::Item;
+    type Error = LockError;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll().map_err(LockError::new)
     }
 }
 
-impl std::fmt::Display for Poisoned {
+// === impl Shared ===
+
+impl<S> Shared<S> {
+    fn release(&mut self, service: S) {
+        trace!(waiters = self.waiters.len(), "releasing");
+        debug_assert!(match self.state {
+            SharedState::Acquired => true,
+            _ => false,
+        });
+        self.state = SharedState::Available(service);
+
+        while let Some(waiter) = self.waiters.pop() {
+            if let Some(task) = waiter.upgrade() {
+                task.notify();
+                return;
+            }
+        }
+    }
+
+    fn fail(&mut self, error: Arc<Error>) {
+        trace!(waiters = self.waiters.len(), %error, "failing");
+        debug_assert!(match self.state {
+            SharedState::Acquired => true,
+            _ => false,
+        });
+        self.state = SharedState::Failed(error);
+
+        while let Some(waiter) = self.waiters.pop() {
+            if let Some(task) = waiter.upgrade() {
+                task.notify();
+            }
+        }
+    }
+}
+
+// === impl LockError ===
+
+impl LockError {
+    pub fn new<E: Into<Error>>(error: E) -> Self {
+        Self::Inner(Arc::new(error.into()))
+    }
+
+    pub fn inner(&self) -> Option<&Error> {
+        match self {
+            LockError::Poisoned => None,
+            LockError::Inner(ref e) => Some(e),
+        }
+    }
+}
+
+impl std::fmt::Display for LockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        match self {
+            LockError::Poisoned => write!(f, "poisoned"),
+            LockError::Inner(ref e) => e.fmt(f),
+        }
     }
 }
 
-impl std::error::Error for Poisoned {}
+impl std::error::Error for LockError {}
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use futures::future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tokio::runtime::current_thread;
@@ -208,22 +311,23 @@ mod test {
             assert!(svc1.poll_ready().expect("must not fail").is_not_ready());
 
             // svc0 remains ready.
-            svc0.call(1)
-                .and_then(move |_| {
-                    // svc1 grabs the lock and is immediately ready.
-                    assert!(svc1.poll_ready().expect("must not fail").is_ready());
-                    // svc0 cannot grab the lock.
-                    assert!(svc0.poll_ready().expect("must not fail").is_not_ready());
+            let fut0 = svc0.call(1);
 
-                    svc1.call(1)
-                })
+            // svc1 grabs the lock and is immediately ready.
+            assert!(svc1.poll_ready().expect("must not fail").is_ready());
+            // svc0 cannot grab the lock.
+            assert!(svc0.poll_ready().expect("must not fail").is_not_ready());
+
+            let fut1 = svc1.call(1);
+
+            fut0.join(fut1)
                 .map(|_| ())
                 .map_err(|_| panic!("must not fail"))
         }));
     }
 
     #[test]
-    fn propagates_poisoned_errors() {
+    fn propagates_errors() {
         current_thread::run(future::lazy(|| {
             let mut svc0 = Layer::default().layer(Decr::from(1));
 
@@ -235,83 +339,20 @@ mod test {
                 .map(move |_| {
                     // svc1 grabs the lock and fails immediately.
                     let mut svc1 = svc0.clone();
-                    assert_eq!(
-                        svc1.poll_ready()
-                            .expect_err("mut fail")
-                            .downcast_ref::<Poisoned>()
-                            .expect("must fail with Poisoned")
-                            .to_string(),
-                        "underflow"
-                    );
+                    assert!(svc1
+                        .poll_ready()
+                        .expect_err("mut fail")
+                        .inner()
+                        .expect("must fail")
+                        .is::<Underflow>());
 
                     // svc0 suffers the same fate.
-                    assert_eq!(
-                        svc0.poll_ready()
-                            .expect_err("mut fail")
-                            .downcast_ref::<Poisoned>()
-                            .expect("must fail with Poisoned")
-                            .to_string(),
-                        "underflow"
-                    );
-                })
-        }));
-    }
-
-    #[test]
-    fn propagates_custom_errors() {
-        current_thread::run(future::lazy(|| {
-            #[derive(Clone, Debug)]
-            enum Custom {
-                Underflow,
-                Wtf,
-            }
-            impl From<Error> for Custom {
-                fn from(e: Error) -> Self {
-                    if e.is::<Underflow>() {
-                        Custom::Underflow
-                    } else {
-                        Custom::Wtf
-                    }
-                }
-            }
-            impl std::fmt::Display for Custom {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    match self {
-                        Custom::Underflow => write!(f, "custom underflow"),
-                        Custom::Wtf => write!(f, "wtf"),
-                    }
-                }
-            }
-            impl std::error::Error for Custom {}
-
-            let mut svc0 = Layer::new::<Custom>().layer(Decr::from(1));
-
-            // svc0 grabs the lock and we decr the service so it will fail.
-            assert!(svc0.poll_ready().expect("must not fail").is_ready());
-            // svc0 remains ready.
-            svc0.call(1)
-                .map_err(|_| panic!("must not fail"))
-                .map(move |_| {
-                    let mut svc1 = svc0.clone();
-                    // svc1 grabs the lock and fails immediately.
-                    assert_eq!(
-                        svc1.poll_ready()
-                            .expect_err("mut fail")
-                            .downcast_ref::<Custom>()
-                            .expect("must fail with Custom")
-                            .to_string(),
-                        "custom underflow"
-                    );
-
-                    // svc0 suffers the same fate.
-                    assert_eq!(
-                        svc0.poll_ready()
-                            .expect_err("mut fail")
-                            .downcast_ref::<Custom>()
-                            .expect("must fail with Custom")
-                            .to_string(),
-                        "custom underflow"
-                    );
+                    assert!(svc0
+                        .poll_ready()
+                        .expect_err("mut fail")
+                        .inner()
+                        .expect("must fail")
+                        .is::<Underflow>());
                 })
         }));
     }

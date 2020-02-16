@@ -932,6 +932,7 @@ dependencies = [
 name = "linkerd2-lock"
 version = "0.1.0"
 dependencies = [
+ "fnv",
  "futures",
  "linkerd2-error",
  "tokio",
