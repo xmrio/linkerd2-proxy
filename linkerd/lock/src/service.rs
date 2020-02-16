@@ -9,11 +9,6 @@ use tracing::trace;
 /// As the service is polled to readiness, the lock is acquired and the inner
 /// service is polled. If the sevice is cloned, the service's lock state is not
 /// retained by the clone.
-///
-/// The inner service's errors are coerced to the cloneable `C`-typed error so
-/// that the error may be returned to all clones of the lock. By default, errors
-/// are propagated through the `Poisoned` type, but they may be propagated
-/// through custom types as well.
 pub struct Lock<S> {
     state: State<S>,
     shared: Arc<Mutex<Shared<S>>>,
