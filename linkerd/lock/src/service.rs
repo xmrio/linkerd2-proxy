@@ -1,4 +1,6 @@
 use crate::error::{Error, Poisoned, ServiceError};
+use crate::shared::Shared;
+use crate::waiter::Wait;
 use futures::{future, Async, Future, Poll};
 use std::sync::{Arc, Mutex};
 use tracing::trace;
@@ -14,30 +16,14 @@ use tracing::trace;
 /// are propagated through the `Poisoned` type, but they may be propagated
 /// through custom types as well.
 pub struct Lock<S> {
-    state: LockState<S>,
+    state: State<S>,
     shared: Arc<Mutex<Shared<S>>>,
 }
 
-enum LockState<S> {
+enum State<S> {
     Released,
-    Waiting(waiter::Wait),
+    Waiting(Wait),
     Acquired(S),
-    Failed(Arc<Error>),
-}
-
-struct Shared<S> {
-    state: SharedState<S>,
-    waiters: Vec<waiter::Notify>,
-}
-
-enum SharedState<S> {
-    /// A Lock is holding the service.
-    Claimed,
-
-    /// The inner service is available.
-    Unclaimed(S),
-
-    /// The lock has failed.
     Failed(Arc<Error>),
 }
 
@@ -46,7 +32,7 @@ enum SharedState<S> {
 impl<S> Lock<S> {
     pub fn new(service: S) -> Self {
         Self {
-            state: LockState::Released,
+            state: State::Released,
             shared: Arc::new(Mutex::new(Shared::new(service))),
         }
     }
@@ -56,7 +42,7 @@ impl<S> Clone for Lock<S> {
     fn clone(&self) -> Self {
         Self {
             // Clones have an independent local lock state.
-            state: LockState::Released,
+            state: State::Released,
             shared: self.shared.clone(),
         }
     }
@@ -75,7 +61,7 @@ where
         loop {
             self.state = match self.state {
                 // This lock has exlcusive access to the inner service.
-                LockState::Acquired(ref mut svc) => match svc.poll_ready() {
+                State::Acquired(ref mut svc) => match svc.poll_ready() {
                     Ok(ok) => {
                         trace!(acquired = true, ready = ok.is_ready(), "poll_ready");
                         return Ok(ok);
@@ -90,29 +76,29 @@ where
                         if let Ok(mut shared) = self.shared.lock() {
                             shared.fail(error.clone());
                         }
-                        LockState::Failed(error)
+                        State::Failed(error)
                     }
                 },
 
-                LockState::Released => match self.shared.lock() {
+                State::Released => match self.shared.lock() {
                     Err(_) => return Err(Poisoned::new().into()),
                     Ok(mut shared) => match shared.try_acquire() {
-                        Ok(None) => LockState::Waiting(waiter::Wait::default()),
-                        Ok(Some(svc)) => LockState::Acquired(svc),
-                        Err(error) => LockState::Failed(error),
+                        Ok(None) => State::Waiting(Wait::default()),
+                        Ok(Some(svc)) => State::Acquired(svc),
+                        Err(error) => State::Failed(error),
                     },
                 },
 
-                LockState::Waiting(ref waiter) => match self.shared.lock() {
+                State::Waiting(ref waiter) => match self.shared.lock() {
                     Err(_) => return Err(Poisoned::new().into()),
                     Ok(mut shared) => match shared.poll_acquire(waiter) {
                         Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Ok(Async::Ready(svc)) => LockState::Acquired(svc),
-                        Err(error) => LockState::Failed(error),
+                        Ok(Async::Ready(svc)) => State::Acquired(svc),
+                        Err(error) => State::Failed(error),
                     },
                 },
 
-                LockState::Failed(ref err) => {
+                State::Failed(ref err) => {
                     return Err(ServiceError::new(err.clone()).into());
                 }
             };
@@ -122,8 +108,8 @@ where
     fn call(&mut self, req: T) -> Self::Future {
         // The service must have been acquired by poll_ready. Reset this lock's
         // state so that it must reacquire the service via poll_ready.
-        let mut svc = match std::mem::replace(&mut self.state, LockState::Released) {
-            LockState::Acquired(svc) => svc,
+        let mut svc = match std::mem::replace(&mut self.state, State::Released) {
+            State::Acquired(svc) => svc,
             _ => panic!("called before ready"),
         };
 
@@ -144,10 +130,10 @@ where
 
 impl<S> Drop for Lock<S> {
     fn drop(&mut self) {
-        match std::mem::replace(&mut self.state, LockState::Released) {
+        match std::mem::replace(&mut self.state, State::Released) {
             // If this lock was holding the service, return it back back to the
             // shared state so another lock may acquire it. Waiters are notified.
-            LockState::Acquired(service) => {
+            State::Acquired(service) => {
                 if let Ok(mut shared) = self.shared.lock() {
                     shared.release(service);
                 }
@@ -155,7 +141,7 @@ impl<S> Drop for Lock<S> {
 
             // If this lock is waiting but the waiter isn't registered, it must
             // have been notified. Notify the next waiter to prevent deadlock.
-            LockState::Waiting(wait) => {
+            State::Waiting(wait) => {
                 if let Ok(mut shared) = self.shared.lock() {
                     if wait.is_not_waiting() {
                         shared.notify_next_waiter();
@@ -164,128 +150,7 @@ impl<S> Drop for Lock<S> {
             }
 
             // No state to cleanup.
-            LockState::Released | LockState::Failed(_) => {}
-        }
-    }
-}
-
-// === impl Shared ===
-
-impl<S> Shared<S> {
-    fn new(service: S) -> Self {
-        Self {
-            waiters: Vec::new(),
-            state: SharedState::Unclaimed(service),
-        }
-    }
-
-    fn try_acquire(&mut self) -> Result<Option<S>, Arc<Error>> {
-        match std::mem::replace(&mut self.state, SharedState::Claimed) {
-            // This lock has acquired the service.
-            SharedState::Unclaimed(svc) => Ok(Some(svc)),
-            // The service is already claimed by a lock.
-            SharedState::Claimed => Ok(None),
-            // The service failed, so reset the state immediately so that all
-            // locks may be notified.
-            SharedState::Failed(error) => {
-                self.state = SharedState::Failed(error.clone());
-                Err(error)
-            }
-        }
-    }
-
-    fn poll_acquire(&mut self, wait: &waiter::Wait) -> Poll<S, Arc<Error>> {
-        match self.try_acquire() {
-            Ok(Some(svc)) => Ok(Async::Ready(svc)),
-            Ok(None) => {
-                self.register(&wait);
-                Ok(Async::NotReady)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    fn register(&mut self, wait: &waiter::Wait) {
-        if let Some(notify) = wait.get_notify() {
-            self.waiters.push(notify);
-        }
-        wait.register();
-        debug_assert!(wait.is_waiting());
-    }
-
-    fn release(&mut self, service: S) {
-        trace!(waiters = self.waiters.len(), "releasing");
-        debug_assert!(match self.state {
-            SharedState::Claimed => true,
-            _ => false,
-        });
-        self.state = SharedState::Unclaimed(service);
-        self.notify_next_waiter();
-    }
-
-    fn notify_next_waiter(&mut self) {
-        while let Some(waiter) = self.waiters.pop() {
-            if waiter.notify() {
-                return;
-            }
-        }
-    }
-
-    fn fail(&mut self, error: Arc<Error>) {
-        trace!(waiters = self.waiters.len(), %error, "failing");
-        debug_assert!(match self.state {
-            SharedState::Claimed => true,
-            _ => false,
-        });
-        self.state = SharedState::Failed(error);
-
-        while let Some(waiter) = self.waiters.pop() {
-            waiter.notify();
-        }
-    }
-}
-
-mod waiter {
-    use futures::task::AtomicTask;
-    use std::sync::{Arc, Weak};
-
-    #[derive(Default)]
-    pub struct Wait(Arc<AtomicTask>);
-
-    pub struct Notify(Weak<AtomicTask>);
-
-    impl Wait {
-        pub fn get_notify(&self) -> Option<Notify> {
-            if self.is_not_waiting() {
-                let n = Notify(Arc::downgrade(&self.0));
-                debug_assert!(self.is_waiting());
-                Some(n)
-            } else {
-                None
-            }
-        }
-
-        pub fn register(&self) {
-            self.0.register();
-        }
-
-        pub fn is_waiting(&self) -> bool {
-            Arc::weak_count(&self.0) == 1
-        }
-
-        pub fn is_not_waiting(&self) -> bool {
-            Arc::weak_count(&self.0) == 0
-        }
-    }
-
-    impl Notify {
-        pub fn notify(self) -> bool {
-            if let Some(task) = self.0.upgrade() {
-                task.notify();
-                true
-            } else {
-                false
-            }
+            State::Released | State::Failed(_) => {}
         }
     }
 }
