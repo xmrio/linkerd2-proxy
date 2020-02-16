@@ -1,5 +1,6 @@
-use super::*;
-use futures::future;
+use crate::error::ServiceError;
+use crate::layer::LockLayer;
+use futures::{future, Async, Future};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::runtime::current_thread;
@@ -60,7 +61,7 @@ fn propagates_errors() {
                 assert!(svc1
                     .poll_ready()
                     .expect_err("mut fail")
-                    .downcast_ref::<error::ServiceError>()
+                    .downcast_ref::<ServiceError>()
                     .expect("must fail with service error")
                     .inner()
                     .is::<Underflow>());
@@ -69,7 +70,7 @@ fn propagates_errors() {
                 assert!(svc0
                     .poll_ready()
                     .expect_err("mut fail")
-                    .downcast_ref::<error::ServiceError>()
+                    .downcast_ref::<ServiceError>()
                     .expect("must fail with service error")
                     .inner()
                     .is::<Underflow>());
