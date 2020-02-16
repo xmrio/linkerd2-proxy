@@ -1,6 +1,7 @@
 use crate::proxy::identity;
 use http::{header::HeaderValue, StatusCode};
 use linkerd2_cache::error as cache;
+use linkerd2_lock as lock;
 use linkerd2_error::Error;
 use linkerd2_error_metrics as metrics;
 use linkerd2_error_respond as respond;
@@ -117,6 +118,8 @@ fn http_status(error: &Error) -> StatusCode {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<IdentityRequired>() {
         http::StatusCode::FORBIDDEN
+    } else if let Some(e) = error.downcast_ref::<lock::error::ServiceError>() {
+        http_status(e.inner())
     } else {
         http::StatusCode::BAD_GATEWAY
     }
@@ -149,6 +152,8 @@ fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) {
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {
             headers.insert(GRPC_MESSAGE, msg);
         }
+    } else if let Some(e) = error.downcast_ref::<lock::error::ServiceError>() {
+        set_grpc_status(e.inner(), headers)
     } else {
         headers.insert(GRPC_STATUS, code_header(Code::Internal));
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {

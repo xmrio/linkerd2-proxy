@@ -1,17 +1,16 @@
 use crate::error::ServiceError;
-use crate::layer::LockLayer;
+use crate::Lock;
 use futures::{future, Async, Future};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::runtime::current_thread;
-use tower::layer::Layer as _Layer;
+use tokio::sync::oneshot;
 use tower::Service as _Service;
 
 #[test]
 fn exclusive_access() {
-    current_thread::run(future::lazy(|| {
+    run(future::lazy(|| {
         let ready = Arc::new(AtomicBool::new(false));
-        let mut svc0 = LockLayer::default().layer(Decr::new(2, ready.clone()));
+        let mut svc0 = Lock::new(Decr::new(2, ready.clone()));
 
         // svc0 grabs the lock, but the inner service isn't ready.
         assert!(svc0.poll_ready().expect("must not fail").is_not_ready());
@@ -47,8 +46,8 @@ fn exclusive_access() {
 
 #[test]
 fn propagates_errors() {
-    current_thread::run(future::lazy(|| {
-        let mut svc0 = LockLayer::default().layer(Decr::from(1));
+    run(future::lazy(|| {
+        let mut svc0 = Lock::new(Decr::from(1));
 
         // svc0 grabs the lock and we decr the service so it will fail.
         assert!(svc0.poll_ready().expect("must not fail").is_ready());
@@ -81,19 +80,22 @@ fn propagates_errors() {
 #[test]
 fn dropping_releases_access() {
     use tower::util::ServiceExt;
-
-    current_thread::run(future::lazy(|| {
+    run(future::lazy(|| {
         let ready = Arc::new(AtomicBool::new(false));
-        let mut svc0 = LockLayer::default().layer(Decr::new(2, ready.clone()));
+        let mut svc0 = Lock::new(Decr::new(3, ready.clone()));
 
         // svc0 grabs the lock, but the inner service isn't ready.
         assert!(svc0.poll_ready().expect("must not fail").is_not_ready());
 
         // Cloning a locked service does not preserve the lock.
         let mut svc1 = svc0.clone();
-
-        // svc1 can't grab the lock.
         assert!(svc1.poll_ready().expect("must not fail").is_not_ready());
+
+        let mut svc2 = svc0.clone();
+        assert!(svc2.poll_ready().expect("must not fail").is_not_ready());
+
+        let mut svc3 = svc0.clone();
+        assert!(svc3.poll_ready().expect("must not fail").is_not_ready());
 
         // svc0 holds the lock and becomes ready with the inner service.
         ready.store(true, Ordering::SeqCst);
@@ -102,17 +104,38 @@ fn dropping_releases_access() {
         // svc1 still can't grab the lock.
         assert!(svc1.poll_ready().expect("must not fail").is_not_ready());
 
-        let mut fut = svc1.oneshot(1);
+        let (tx1, mut rx1) = oneshot::channel();
+        tokio::spawn(svc1.oneshot(1).then(move |_| tx1.send(()).map_err(|_| ())));
+        let (tx2, mut rx2) = oneshot::channel();
+        tokio::spawn(svc2.oneshot(1).then(move |_| tx2.send(()).map_err(|_| ())));
 
-        assert!(fut.poll().expect("must not fail").is_not_ready());
+        assert!(rx1.poll().expect("must not fail").is_not_ready());
+        assert!(rx2.poll().expect("must not fail").is_not_ready());
 
         drop(svc0);
+        // svc3 notified; drop svc3 without polling to ensure that
 
-        // svc1 grabs the lock and is immediately ready.
-        assert_eq!(fut.poll().expect("must not fail"), Async::Ready(1));
+        assert!(rx1.poll().expect("must not fail").is_not_ready());
+        assert!(rx2.poll().expect("must not fail").is_not_ready());
 
-        Ok(().into())
+        drop(svc3);
+        // svc2 notified
+
+        rx2.then(move |_| rx1).map_err(|_| ())
     }));
+}
+
+fn run<F>(future: F)
+where
+    F: Future<Item = (), Error = ()> + 'static,
+{
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stdout)
+        .finish();
+    tracing::subscriber::with_default(subscriber, move || {
+        tokio::runtime::current_thread::run(future)
+    });
 }
 
 #[derive(Debug, Default)]

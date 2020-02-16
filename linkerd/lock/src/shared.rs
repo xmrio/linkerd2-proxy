@@ -39,7 +39,10 @@ impl<T> Shared<T> {
     pub fn try_acquire(&mut self) -> Result<Option<T>, Arc<Error>> {
         match std::mem::replace(&mut self.state, State::Claimed) {
             // This lock has acquired the value.
-            State::Unclaimed(v) => Ok(Some(v)),
+            State::Unclaimed(v) => {
+                trace!("acquired");
+                Ok(Some(v))
+            }
             // The value is already claimed by a lock.
             State::Claimed => Ok(None),
             // The locks failed, so reset the state immediately so that all
@@ -61,6 +64,7 @@ impl<T> Shared<T> {
                 wait.register();
                 // Register the waiter's notify handle if one isn't already registered.
                 if let Some(notify) = wait.get_notify() {
+                    trace!("Registering waiter");
                     self.waiters.push(notify);
                 }
                 debug_assert!(wait.is_waiting());
@@ -71,7 +75,7 @@ impl<T> Shared<T> {
     }
 
     pub fn release_and_notify(&mut self, value: T) {
-        trace!(waiters = self.waiters.len(), "releasing");
+        trace!(waiters = self.waiters.len(), "Releasing");
         debug_assert!(match self.state {
             State::Claimed => true,
             _ => false,
@@ -83,13 +87,14 @@ impl<T> Shared<T> {
     pub fn notify_next_waiter(&mut self) {
         while let Some(waiter) = self.waiters.pop() {
             if waiter.notify() {
+                trace!("Notified waiter");
                 return;
             }
         }
     }
 
     pub fn fail(&mut self, error: Arc<Error>) {
-        trace!(waiters = self.waiters.len(), %error, "failing");
+        trace!(waiters = self.waiters.len(), %error, "Failing");
         debug_assert!(match self.state {
             State::Claimed => true,
             _ => false,
