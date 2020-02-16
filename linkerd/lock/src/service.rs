@@ -1,6 +1,5 @@
 use crate::error::{Error, Poisoned, ServiceError};
-use crate::shared::Shared;
-use crate::waiter::Wait;
+use crate::shared::{Shared, Wait};
 use futures::{future, Async, Future, Poll};
 use std::sync::{Arc, Mutex};
 use tracing::trace;
@@ -120,7 +119,7 @@ where
         // The service is dropped if the inner mutex has been poisoned, and
         // subsequent calsl to poll_ready will return a Poisioned error.
         if let Ok(mut shared) = self.shared.lock() {
-            shared.release(svc);
+            shared.release_and_notify(svc);
         }
 
         // The inner service's error type is *not* wrapped with a ServiceError.
@@ -135,7 +134,7 @@ impl<S> Drop for Lock<S> {
             // shared state so another lock may acquire it. Waiters are notified.
             State::Acquired(service) => {
                 if let Ok(mut shared) = self.shared.lock() {
-                    shared.release(service);
+                    shared.release_and_notify(service);
                 }
             }
 

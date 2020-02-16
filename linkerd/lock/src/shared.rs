@@ -1,20 +1,25 @@
+use self::waiter::Notify;
+pub(crate) use self::waiter::Wait;
 use crate::error::Error;
-use crate::waiter::{Notify, Wait};
 use futures::{Async, Poll};
 use std::sync::Arc;
 use tracing::trace;
 
-pub(crate) struct Shared<S> {
-    state: State<S>,
+/// The shared state between one or more Lock instances.
+///
+/// When multiple lock instances are contending for the inner value, waiters are
+/// stored in a LIFO stack. This is done to bias for latency instead of fairness
+pub(crate) struct Shared<T> {
+    state: State<T>,
     waiters: Vec<Notify>,
 }
 
-enum State<S> {
+enum State<T> {
     /// A Lock is holding the service.
     Claimed,
 
-    /// The inner service is available.
-    Unclaimed(S),
+    /// The inner value is available.
+    Unclaimed(T),
 
     /// The lock has failed.
     Failed(Arc<Error>),
@@ -22,22 +27,23 @@ enum State<S> {
 
 // === impl Shared ===
 
-impl<S> Shared<S> {
-    pub fn new(service: S) -> Self {
+impl<T> Shared<T> {
+    pub fn new(value: T) -> Self {
         Self {
             waiters: Vec::new(),
-            state: State::Unclaimed(service),
+            state: State::Unclaimed(value),
         }
     }
 
-    pub fn try_acquire(&mut self) -> Result<Option<S>, Arc<Error>> {
+    /// Try to claim a value without registering a waiter.
+    pub fn try_acquire(&mut self) -> Result<Option<T>, Arc<Error>> {
         match std::mem::replace(&mut self.state, State::Claimed) {
-            // This lock has acquired the service.
-            State::Unclaimed(svc) => Ok(Some(svc)),
-            // The service is already claimed by a lock.
+            // This lock has acquired the value.
+            State::Unclaimed(v) => Ok(Some(v)),
+            // The value is already claimed by a lock.
             State::Claimed => Ok(None),
-            // The service failed, so reset the state immediately so that all
-            // locks may be notified.
+            // The locks failed, so reset the state immediately so that all
+            // instances may be notified.
             State::Failed(error) => {
                 self.state = State::Failed(error.clone());
                 Err(error)
@@ -45,32 +51,32 @@ impl<S> Shared<S> {
         }
     }
 
-    pub fn poll_acquire(&mut self, wait: &Wait) -> Poll<S, Arc<Error>> {
+    /// Try to acquire a value or register the given waiter to be notified when
+    /// the lock is available.
+    pub fn poll_acquire(&mut self, wait: &Wait) -> Poll<T, Arc<Error>> {
         match self.try_acquire() {
             Ok(Some(svc)) => Ok(Async::Ready(svc)),
             Ok(None) => {
-                self.register(&wait);
+                // Register the current task to be notified.
+                wait.register();
+                // Register the waiter's notify handle if one isn't already registered.
+                if let Some(notify) = wait.get_notify() {
+                    self.waiters.push(notify);
+                }
+                debug_assert!(wait.is_waiting());
                 Ok(Async::NotReady)
             }
             Err(error) => Err(error),
         }
     }
 
-    pub fn register(&mut self, wait: &Wait) {
-        if let Some(notify) = wait.get_notify() {
-            self.waiters.push(notify);
-        }
-        wait.register();
-        debug_assert!(wait.is_waiting());
-    }
-
-    pub fn release(&mut self, service: S) {
+    pub fn release_and_notify(&mut self, value: T) {
         trace!(waiters = self.waiters.len(), "releasing");
         debug_assert!(match self.state {
             State::Claimed => true,
             _ => false,
         });
-        self.state = State::Unclaimed(service);
+        self.state = State::Unclaimed(value);
         self.notify_next_waiter();
     }
 
@@ -92,6 +98,62 @@ impl<S> Shared<S> {
 
         while let Some(waiter) = self.waiters.pop() {
             waiter.notify();
+        }
+    }
+}
+
+mod waiter {
+    use futures::task::AtomicTask;
+    use std::sync::{Arc, Weak};
+
+    /// A handle held by lock services when waiting to be notified.
+    #[derive(Default)]
+    pub(crate) struct Wait(Arc<AtomicTask>);
+
+    /// A handle held by shared lock state to notify a waiting lock.
+    ///
+    /// There may be at most one `Notify` instance per `Wait` instance.
+    pub(super) struct Notify(Weak<AtomicTask>);
+
+    impl Wait {
+        /// If a `Notify` handle does not currently exist for this waiter, create a new one.
+        pub(super) fn get_notify(&self) -> Option<Notify> {
+            if self.is_not_waiting() {
+                let n = Notify(Arc::downgrade(&self.0));
+                debug_assert!(self.is_waiting());
+                Some(n)
+            } else {
+                None
+            }
+        }
+
+        /// Register this waiter with the current task.
+        pub(super) fn register(&self) {
+            self.0.register();
+        }
+
+        /// Returns true iff there is currently a `Notify` handle for this waiter.
+        pub fn is_waiting(&self) -> bool {
+            Arc::weak_count(&self.0) == 1
+        }
+
+        /// Returns true iff there is not currently a `Notify` handle for this waiter.
+        pub fn is_not_waiting(&self) -> bool {
+            Arc::weak_count(&self.0) == 0
+        }
+    }
+
+    impl Notify {
+        /// Attempt to notify the waiter.
+        ///
+        /// Returns true if a waiter was notified and false otherwise.
+        pub fn notify(self) -> bool {
+            if let Some(task) = self.0.upgrade() {
+                task.notify();
+                true
+            } else {
+                false
+            }
         }
     }
 }
