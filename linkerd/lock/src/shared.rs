@@ -15,7 +15,7 @@ pub(crate) struct Shared<T> {
 }
 
 enum State<T> {
-    /// A Lock is holding the service.
+    /// A Lock is holding the value.
     Claimed,
 
     /// The inner value is available.
@@ -111,17 +111,19 @@ mod waiter {
     use futures::task::AtomicTask;
     use std::sync::{Arc, Weak};
 
-    /// A handle held by lock services when waiting to be notified.
+    /// A handle held by Lock instances when waiting to be notified.
     #[derive(Default)]
     pub(crate) struct Wait(Arc<AtomicTask>);
 
-    /// A handle held by shared lock state to notify a waiting lock.
+    /// A handle held by shared lock state to notify a waiting Lock.
     ///
-    /// There may be at most one `Notify` instance per `Wait` instance.
+    /// There may be at most one `Notify` instance per `Wait` instance at any one
+    /// time.
     pub(super) struct Notify(Weak<AtomicTask>);
 
     impl Wait {
-        /// If a `Notify` handle does not currently exist for this waiter, create a new one.
+        /// If a `Notify` handle does not currently exist for this waiter, create
+        /// a new one.
         pub(super) fn get_notify(&self) -> Option<Notify> {
             if self.is_not_waiting() {
                 let n = Notify(Arc::downgrade(&self.0));
