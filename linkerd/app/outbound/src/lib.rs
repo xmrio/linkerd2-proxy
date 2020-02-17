@@ -500,13 +500,9 @@ impl From<Error> for DiscoveryError {
 fn is_discovery_rejected(err: &Error) -> bool {
     tracing::trace!(?err, "is_discovery_rejected");
 
-    if err.is::<DiscoveryRejected>() || err.is::<profiles::InvalidProfileAddr>() {
-        return true;
-    }
-
     if let Some(lock) = err.downcast_ref::<svc::lock::error::ServiceError>() {
         return is_discovery_rejected(lock.inner());
     }
 
-    false
+    err.is::<DiscoveryRejected>() || err.is::<profiles::InvalidProfileAddr>()
 }
