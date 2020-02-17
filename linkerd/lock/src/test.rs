@@ -144,7 +144,8 @@ fn dropping_releases_access() {
 
 #[test]
 fn fuzz() {
-    for (concurrency, iterations) in &[(1, 100_000), (3, 100_000), (100, 100_000)] {
+    const ITERS: usize = 100_000;
+    for (concurrency, iterations) in &[(1, ITERS), (3, ITERS), (100, ITERS)] {
         tokio::run(future::lazy(move || {
             let svc = Lock::new(Decr::new(*iterations, Arc::new(true.into())));
             let (tx, rx) = mpsc::channel(1);
@@ -160,7 +161,6 @@ fn fuzz() {
 
     struct Loop {
         lock: Lock<Decr>,
-
         _tx: mpsc::Sender<()>,
     }
     impl Future for Loop {
