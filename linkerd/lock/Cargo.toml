@@ -9,7 +9,6 @@ A middleware that provides mutual exclusion.
 """
 
 [dependencies]
-fnv = "1.0"
 futures = "0.1"
 linkerd2-error = { path = "../error" }
 tokio = "0.1"
@@ -20,4 +19,4 @@ tracing = "0.1"
 rand = "0.7"
 tracing-futures = "0.1"
 tracing-log = "0.1"
-tracing-subscriber = "0.1"
+tracing-subscriber = "0.2"
