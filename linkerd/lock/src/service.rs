@@ -57,7 +57,7 @@ where
                 // This lock has exlcusive access to the inner service.
                 State::Acquired(ref mut svc) => match svc.poll_ready() {
                     Ok(ok) => {
-                        trace!(acquired = true, ready = ok.is_ready(), "poll_ready");
+                        trace!(ready = ok.is_ready(), "Acquired");
                         return Ok(ok);
                     }
                     Err(inner) => {
@@ -66,7 +66,7 @@ where
                         // lock's state to prevent trying to acquire the shared
                         // state again.
                         let error = Arc::new(inner.into());
-                        trace!(%error, "poll_ready");
+                        trace!(%error, "Failing");
                         if let Ok(mut shared) = self.shared.lock() {
                             shared.fail(error.clone());
                         }
@@ -74,26 +74,33 @@ where
                     }
                 },
 
-                State::Released => match self.shared.lock() {
-                    Err(_) => return Err(Poisoned::new().into()),
-                    Ok(mut shared) => match shared.try_acquire() {
-                        Ok(None) => State::Waiting(Wait::default()),
-                        Ok(Some(svc)) => State::Acquired(svc),
-                        Err(error) => State::Failed(error),
-                    },
-                },
+                State::Released => {
+                    trace!("Released");
+                    match self.shared.lock() {
+                        Err(_) => return Err(Poisoned::new().into()),
+                        Ok(mut shared) => match shared.try_acquire() {
+                            Ok(None) => State::Waiting(Wait::default()),
+                            Ok(Some(svc)) => State::Acquired(svc),
+                            Err(error) => State::Failed(error),
+                        },
+                    }
+                }
 
-                State::Waiting(ref waiter) => match self.shared.lock() {
-                    Err(_) => return Err(Poisoned::new().into()),
-                    Ok(mut shared) => match shared.poll_acquire(waiter) {
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Ok(Async::Ready(svc)) => State::Acquired(svc),
-                        Err(error) => State::Failed(error),
-                    },
-                },
+                State::Waiting(ref waiter) => {
+                    trace!("Waiting");
+                    match self.shared.lock() {
+                        Err(_) => return Err(Poisoned::new().into()),
+                        Ok(mut shared) => match shared.poll_acquire(waiter) {
+                            Ok(Async::NotReady) => return Ok(Async::NotReady),
+                            Ok(Async::Ready(svc)) => State::Acquired(svc),
+                            Err(error) => State::Failed(error),
+                        },
+                    }
+                }
 
-                State::Failed(ref err) => {
-                    return Err(ServiceError::new(err.clone()).into());
+                State::Failed(ref error) => {
+                    trace!(%error, "Failed");
+                    return Err(ServiceError::new(error.clone()).into());
                 }
             };
         }
@@ -114,6 +121,7 @@ where
         // The service is dropped if the inner mutex has been poisoned, and
         // subsequent calsl to poll_ready will return a Poisioned error.
         if let Ok(mut shared) = self.shared.lock() {
+            trace!("Releasing acquired lock after use");
             shared.release_and_notify(svc);
         }
 
@@ -128,6 +136,7 @@ impl<S> Drop for Lock<S> {
             // If this lock was holding the service, return it back back to the
             // shared state so another lock may acquire it. Waiters are notified.
             State::Acquired(service) => {
+                trace!("Dropping while acquired");
                 if let Ok(mut shared) = self.shared.lock() {
                     shared.release_and_notify(service);
                 }
@@ -136,6 +145,7 @@ impl<S> Drop for Lock<S> {
             // If this lock is waiting but the waiter isn't registered, it must
             // have been notified. Notify the next waiter to prevent deadlock.
             State::Waiting(wait) => {
+                trace!("Dropping while waiting");
                 if let Ok(mut shared) = self.shared.lock() {
                     if wait.is_not_waiting() {
                         shared.notify_next_waiter();

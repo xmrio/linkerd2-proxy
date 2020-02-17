@@ -1,11 +1,11 @@
 use crate::proxy::identity;
 use http::{header::HeaderValue, StatusCode};
 use linkerd2_cache::error as cache;
-use linkerd2_lock as lock;
 use linkerd2_error::Error;
 use linkerd2_error_metrics as metrics;
 use linkerd2_error_respond as respond;
 pub use linkerd2_error_respond::RespondLayer;
+use linkerd2_lock as lock;
 use linkerd2_proxy_http::HasH2Reason;
 use tower::load_shed::error as shed;
 use tower_grpc::{self as grpc, Code};
