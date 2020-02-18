@@ -198,24 +198,18 @@ impl<A: OrigDstAddr> Config<A> {
             let http_balancer = http_endpoint
                 .clone()
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
-                .push(
-                    metrics
-                        .stack
-                        .new_layer(stack_labels("balance.endpoint.make")),
-                )
-                .push_per_service(metrics.stack.new_layer(stack_labels("balance.endpoint")))
+                .push_per_service(metrics.stack.layer(stack_labels("balance.endpoint")))
                 .push_per_service(http::box_request::Layer::new())
                 .push_spawn_ready()
                 .check_service::<Target<HttpEndpoint>>()
                 .push(discover)
                 .push_per_service(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
-                .push(metrics.stack.new_layer(stack_labels("balance.make")))
                 .push_pending()
                 // Shares the balancer, ensuring discovery errors are propagated.
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("balance"))),
+                        .push(metrics.stack.layer(stack_labels("balance"))),
                 )
                 .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
             let http_balancer_cache = info_span!("balance")
@@ -231,7 +225,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(http::box_request::Layer::new())
                 .push_pending()
                 .push_per_service(svc::layers().push_lock())
-                .push_per_service(metrics.stack.new_layer(stack_labels("forward.endpoint")))
+                .push_per_service(metrics.stack.layer(stack_labels("forward.endpoint")))
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
                 });
@@ -301,7 +295,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("profile"))),
+                        .push(metrics.stack.layer(stack_labels("profile"))),
                 )
                 .push_trace(|_: &Profile| info_span!("profile"));
 
@@ -320,7 +314,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("canonicalize"))),
+                        .push(metrics.stack.layer(stack_labels("canonicalize"))),
                 )
                 .push_trace(|name: &dns::Name| info_span!("canonicalize", %name));
             let dns_refine_cache = info_span!("canonicalize")
@@ -398,7 +392,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // Used by tap.
                 .push_http_insert_target()
                 .push_per_service(http_admit_request)
-                .push_per_service(metrics.stack.new_layer(stack_labels("source")))
+                .push_per_service(metrics.stack.layer(stack_labels("source")))
                 .push_trace(
                     |src: &tls::accept::Meta| {
                         info_span!("source", target.addr = %src.addrs.target_addr())

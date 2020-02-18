@@ -114,12 +114,11 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push(metrics.stack.new_layer(stack_labels("endpoint.make")))
                 .push_pending()
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("endpoint"))),
+                        .push(metrics.stack.layer(stack_labels("endpoint"))),
                 )
                 .spawn_cache(cache_capacity, cache_max_idle_age)
                 .push_trace(|ep: &HttpEndpoint| {
@@ -159,12 +158,11 @@ impl<A: OrigDstAddr> Config<A> {
                 // absolute-form on the outbound side.
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
-                .push(metrics.stack.new_layer(stack_labels("target.make")))
                 .push_pending()
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("target"))),
+                        .push(metrics.stack.layer(stack_labels("target"))),
                 )
                 .check_new_clone_service::<Target>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)
@@ -182,12 +180,11 @@ impl<A: OrigDstAddr> Config<A> {
                     profiles_client,
                     http_profile_route_proxy.into_inner(),
                 ))
-                .push(metrics.stack.new_layer(stack_labels("profile.make")))
                 .push_pending()
                 .push_per_service(
                     svc::layers()
                         .push_lock()
-                        .push(metrics.stack.new_layer(stack_labels("profile"))),
+                        .push(metrics.stack.layer(stack_labels("profile"))),
                 )
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
@@ -255,7 +252,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_per_service(http_strip_headers)
                 .push_per_service(http_admit_request)
                 .push_per_service(http_server_observability)
-                .push_per_service(metrics.stack.new_layer(stack_labels("source")))
+                .push_per_service(metrics.stack.layer(stack_labels("source")))
                 .push_trace(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
@@ -283,10 +280,6 @@ impl<A: OrigDstAddr> Config<A> {
 
         Ok(Inbound { listen_addr, serve })
     }
-}
-
-fn stack_labels(name: &'static str) -> metric_labels::StackLabels {
-    metric_labels::StackLabels::inbound(name)
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -326,4 +319,8 @@ pub fn trace_labels() -> HashMap<String, String> {
     let mut l = HashMap::new();
     l.insert("direction".to_string(), "inbound".to_string());
     l
+}
+
+fn stack_labels(name: &'static str) -> metric_labels::StackLabels {
+    metric_labels::StackLabels::inbound(name)
 }

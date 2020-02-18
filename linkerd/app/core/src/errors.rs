@@ -235,7 +235,7 @@ impl metrics::FmtLabels for Reason {
     fn fmt_labels(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "cause=\"{}\"",
+            "message=\"{}\"",
             match self {
                 Reason::CacheFull => "cache full",
                 Reason::LoadShed => "load shed",
