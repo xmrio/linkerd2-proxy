@@ -1,3 +1,5 @@
+#![deny(warnings, rust_2018_idioms)]
+
 use futures::{Future, Poll};
 use linkerd2_error::Error;
 use linkerd2_stack::{proxy, NewService, Proxy};

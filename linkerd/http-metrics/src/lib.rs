@@ -1,3 +1,5 @@
+#![deny(warnings, rust_2018_idioms)]
+
 pub use self::{requests::Requests, retries::Retries};
 use indexmap::IndexMap;
 use std::fmt;
