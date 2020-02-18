@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut};
 use futures::{try_ready, Async, Future, Poll};
 use std::io;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{info_span, trace};
+use tracing::{debug_span, trace};
 
 /// A future piping data bi-directionally to In and Out.
 pub struct Duplex<In, Out> {
@@ -58,8 +58,8 @@ where
         // return early if the first half isn't ready, but the other half
         // could make progress.
         trace!("poll");
-        info_span!("in>out").in_scope(|| self.half_in.copy_into(&mut self.half_out))?;
-        info_span!("out>in").in_scope(|| {
+        debug_span!("in>out").in_scope(|| self.half_in.copy_into(&mut self.half_out))?;
+        debug_span!("out>in").in_scope(|| {
             self.half_out.copy_into(&mut self.half_in).map_err(|error| {
                 trace!(%error);
                 error
