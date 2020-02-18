@@ -4,11 +4,12 @@ use self::cache::Cache;
 pub use self::layer::Layer;
 pub use self::purge::Purge;
 use futures::{future, Async, Poll};
+use linkerd2_error::Error;
+use linkerd2_lock::{Guard, Lock};
 use linkerd2_stack::NewService;
 use std::hash::Hash;
 use std::time::Duration;
-use tokio::sync::lock::{Lock, LockGuard};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 mod cache;
 pub mod error;
@@ -22,7 +23,7 @@ where
 {
     make: M,
     cache: Lock<Cache<T, M::Service>>,
-    lock: Option<LockGuard<Cache<T, M::Service>>>,
+    guard: Option<Guard<Cache<T, M::Service>>>,
     _hangup: purge::Handle,
 }
 
@@ -40,8 +41,8 @@ where
         let router = Self {
             cache,
             make,
+            guard: None,
             _hangup,
-            lock: None,
         };
 
         (router, purge)
@@ -58,8 +59,8 @@ where
         Self {
             make: self.make.clone(),
             cache: self.cache.clone(),
+            guard: None,
             _hangup: self._hangup.clone(),
-            lock: None,
         }
     }
 }
@@ -71,28 +72,25 @@ where
     M::Service: Clone,
 {
     type Response = M::Service;
-    type Error = error::NoCapacity;
+    type Error = Error;
     type Future = future::FutureResult<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        if self.lock.is_none() {
-            let lock = match self.cache.poll_lock() {
-                Async::NotReady => {
-                    trace!("Waiting to acquire lock");
-                    return Ok(Async::NotReady);
+        if self.guard.is_none() {
+            match self.cache.poll_acquire() {
+                Async::NotReady => return Ok(Async::NotReady),
+                Async::Ready(guard) => {
+                    self.guard = Some(guard);
                 }
-                Async::Ready(lock) => lock,
-            };
-
-            trace!("Lock acquired");
-            self.lock = Some(lock);
+            }
         }
 
+        debug_assert!(self.guard.is_some());
         Ok(Async::Ready(()))
     }
 
     fn call(&mut self, target: T) -> Self::Future {
-        let mut cache = self.lock.take().expect("not ready");
+        let mut cache = self.guard.take().expect("poll_ready must be called");
 
         if let Some(service) = cache.access(&target) {
             trace!("target already exists in cache");
@@ -101,14 +99,16 @@ where
 
         let available = cache.available();
         if available == 0 {
-            debug!(capacity = %cache.capacity(), "exhausted");
+            warn!(capacity = %cache.capacity(), "exhausted");
             return future::err(error::NoCapacity(cache.capacity()).into());
         }
 
         // Make a new service for the target
-        debug!(%available, "inserting new target into cache");
         let service = self.make.new_service(target.clone());
+
+        debug!(%available, "inserting new target into cache");
         cache.insert(target.clone(), service.clone());
+
         future::ok(service.into())
     }
 }

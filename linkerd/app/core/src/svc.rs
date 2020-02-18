@@ -159,7 +159,7 @@ impl<S> Stack<S> {
         self.push(ready::Layer::new())
     }
 
-    pub fn push_lock(self) -> Stack<lock::Lock<S>> {
+    pub fn push_lock(self) -> Stack<lock::LockService<S>> {
         self.push(lock::LockLayer::new())
     }
 

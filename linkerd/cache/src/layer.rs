@@ -64,7 +64,7 @@ impl<M> MakeCache<M> {
             Service::new(self.inner, self.config.capacity, self.config.max_idle_age);
         tokio::spawn(
             purge
-                .map_err(|e| match e {})
+                .map_err(|e| panic!("unexpected purge failure: {}", e))
                 .instrument(info_span!("cache")),
         );
         service
