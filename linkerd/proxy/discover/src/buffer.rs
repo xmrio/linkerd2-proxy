@@ -125,6 +125,9 @@ where
                 Ok(Async::Ready(n)) => match n {},
             }
 
+            // The watchdog bounds the amount of time that the send buffer stays
+            // full. This is designed to release the `discover` resources, i.e.
+            // if we expect that the receiver has leaked.
             match self.tx.poll_ready() {
                 Ok(Async::Ready(())) => {
                     self.watchdog = None;
