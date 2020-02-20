@@ -17,8 +17,8 @@ use linkerd2_app_core::{
     opencensus::proto::trace::v1 as oc,
     profiles,
     proxy::{
-        self, core::resolve::Resolve, discover, fallback, http, identity, resolve::map_endpoint,
-        tap, tcp, Server,
+        self, core::resolve::Resolve, discover, http, identity, resolve::map_endpoint, tap, tcp,
+        Server,
     },
     reconnect, retry, router, serve,
     spans::SpanConverter,
@@ -244,13 +244,11 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_service::<Concrete<HttpEndpoint>>()
                 .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
-                .push(
-                    fallback::Layer::new(
-                        http_forward_cache
-                            .push_per_service(svc::layers().box_http_response())
-                            .into_inner(),
-                    )
-                    .with_predicate(is_discovery_rejected),
+                .push_fallback_with_predicate(
+                    http_forward_cache
+                        .push_per_service(svc::layers().box_http_response())
+                        .into_inner(),
+                    is_discovery_rejected,
                 )
                 .check_service::<Concrete<HttpEndpoint>>();
 
@@ -333,18 +331,16 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_service::<Logical<HttpEndpoint>>()
                 .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
-                .push(
-                    fallback::Layer::new(
-                        http_concrete
-                            .push_map_target(|inner: Logical<HttpEndpoint>| Concrete {
-                                addr: inner.addr.clone(),
-                                inner,
-                            })
-                            .push_per_service(svc::layers().box_http_response().box_http_request())
-                            .check_service::<Logical<HttpEndpoint>>()
-                            .into_inner(),
-                    )
-                    .with_predicate(is_discovery_rejected),
+                .push_fallback_with_predicate(
+                    http_concrete
+                        .push_map_target(|inner: Logical<HttpEndpoint>| Concrete {
+                            addr: inner.addr.clone(),
+                            inner,
+                        })
+                        .push_per_service(svc::layers().box_http_response().box_http_request())
+                        .check_service::<Logical<HttpEndpoint>>()
+                        .into_inner(),
+                    is_discovery_rejected,
                 )
                 .check_service::<Logical<HttpEndpoint>>()
                 // Sets the canonical-dst header on all outbound requests.

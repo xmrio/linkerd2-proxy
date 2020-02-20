@@ -16,7 +16,7 @@ use linkerd2_app_core::{
     opencensus::proto::trace::v1 as oc,
     profiles,
     proxy::{
-        self, fallback,
+        self,
         http::{client, normalize_uri, orig_proto, strip_header},
         identity,
         server::{Protocol as ServerProtocol, Server},
@@ -229,9 +229,10 @@ impl<A: OrigDstAddr> Config<A> {
             let http_server = svc::stack(http_profile_cache)
                 .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
-                .push(fallback::Layer::new(http_target_cache.push_per_service(
-                    svc::layers().box_http_response().box_http_request(),
-                )))
+                .push_fallback(
+                    http_target_cache
+                        .push_per_service(svc::layers().box_http_response().box_http_request()),
+                )
                 .check_service::<Target>()
                 // Ensures that the built service is ready before it is returned
                 // to the router to dispatch a request.

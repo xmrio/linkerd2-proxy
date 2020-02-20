@@ -1,10 +1,10 @@
 // Possibly unused, but useful during development.
-#![allow(dead_code)]
 
 pub use crate::proxy::{buffer, http, ready};
 use crate::{cache, trace, Error};
 use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
+pub use linkerd2_fallback as fallback;
 pub use linkerd2_lock as lock;
 pub use linkerd2_stack::{
     self as stack, layer, map_response, map_target, new_service, oneshot, pending, per_service,
@@ -46,6 +46,7 @@ impl<T> NewService<T> for IdentityProxy {
     }
 }
 
+#[allow(dead_code)]
 impl<L> Layers<L> {
     pub fn push<O>(self, outer: O) -> Layers<Pair<L, O>> {
         Layers(Pair::new(self.0, outer))
@@ -135,6 +136,7 @@ impl<M, L: Layer<M>> Layer<M> for Layers<L> {
     }
 }
 
+#[allow(dead_code)]
 impl<S> Stack<S> {
     pub fn push<L: Layer<S>>(self, layer: L) -> Stack<L::Service> {
         Stack(layer.layer(self.0))
@@ -216,6 +218,22 @@ impl<S> Stack<S> {
 
     pub fn push_http_insert_target(self) -> Stack<http::insert::target::NewService<S>> {
         self.push(http::insert::target::layer())
+    }
+
+    pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<fallback::Fallback<S, F>> {
+        self.push(fallback::FallbackLayer::new(fallback))
+    }
+
+    pub fn push_fallback_with_predicate<F, P>(
+        self,
+        fallback: F,
+        predicate: P,
+    ) -> Stack<fallback::Fallback<S, F, P>>
+    where
+        F: Clone,
+        P: Fn(&Error) -> bool + Clone,
+    {
+        self.push(fallback::FallbackLayer::new(fallback).with_predicate(predicate))
     }
 
     pub fn spawn_cache<T>(

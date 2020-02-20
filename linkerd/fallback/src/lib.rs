@@ -5,19 +5,12 @@ use linkerd2_error::Error;
 use tower::util::{Either, Oneshot, ServiceExt};
 use tracing::debug;
 
-/// A fallback layer composing two service builders.
-///
-/// If the future returned by the primary builder's `MakeService` fails with
-/// an error matching a given predicate, the fallback future will attempt
-/// to call the secondary `MakeService`.
-#[derive(Clone, Debug)]
-pub struct Layer<F, P = fn(&Error) -> bool> {
-    fallback: F,
-    predicate: P,
-}
+mod layer;
+
+pub use self::layer::FallbackLayer;
 
 #[derive(Clone, Debug)]
-pub struct Fallback<I, F, P> {
+pub struct Fallback<I, F, P = fn(&Error) -> bool> {
     inner: I,
     fallback: F,
     predicate: P,
@@ -26,55 +19,6 @@ pub struct Fallback<I, F, P> {
 pub enum MakeFuture<A, B, P> {
     A { a: A, b: Option<B>, predicate: P },
     B(B),
-}
-
-// === impl Layer ===
-
-impl<B> Layer<B> {
-    pub fn new(fallback: B) -> Self {
-        let predicate: fn(&Error) -> bool = |_| true;
-        Self {
-            fallback,
-            predicate,
-        }
-    }
-
-    /// Returns a `Layer` that uses the given `predicate` to determine whether
-    /// to fall back.
-    pub fn with_predicate<P>(self, predicate: P) -> Layer<B, P>
-    where
-        P: Fn(&Error) -> bool + Clone,
-    {
-        Layer {
-            fallback: self.fallback,
-            predicate,
-        }
-    }
-
-    /// Returns a `Layer` that falls back if the error or its source is of
-    /// type `E`.
-    pub fn on_error<E>(self) -> Layer<B>
-    where
-        E: std::error::Error + 'static,
-    {
-        self.with_predicate(|e| e.is::<E>() || e.source().map(|s| s.is::<E>()).unwrap_or(false))
-    }
-}
-
-impl<A, B, P> tower::layer::Layer<A> for Layer<B, P>
-where
-    B: Clone,
-    P: Clone,
-{
-    type Service = Fallback<A, B, P>;
-
-    fn layer(&self, inner: A) -> Self::Service {
-        Self::Service {
-            inner,
-            fallback: self.fallback.clone(),
-            predicate: self.predicate.clone(),
-        }
-    }
 }
 
 // === impl Fallback ===
