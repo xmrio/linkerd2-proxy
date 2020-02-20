@@ -624,6 +624,7 @@ dependencies = [
  "indexmap",
  "libc",
  "linkerd2-addr",
+ "linkerd2-box",
  "linkerd2-cache",
  "linkerd2-concurrency-limit",
  "linkerd2-conditional",
@@ -756,6 +757,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "linkerd2-box"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "linkerd2-error",
+ "tower",
+]
+
+[[package]]
 name = "linkerd2-cache"
 version = "0.1.0"
 dependencies = [
@@ -869,6 +879,18 @@ dependencies = [
  "linkerd2-error",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "linkerd2-http-box"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "http",
+ "hyper",
+ "linkerd2-error",
+ "tower",
 ]
 
 [[package]]
@@ -1068,6 +1090,7 @@ dependencies = [
  "linkerd2-drain",
  "linkerd2-duplex",
  "linkerd2-error",
+ "linkerd2-http-box",
  "linkerd2-identity",
  "linkerd2-metrics",
  "linkerd2-proxy-transport",

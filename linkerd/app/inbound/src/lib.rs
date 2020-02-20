@@ -173,7 +173,7 @@ impl<A: OrigDstAddr> Config<A> {
             // resolutions are shared even as the type of request may vary.
             let http_profile_cache = http_target_cache
                 .clone()
-                .push_per_service(svc::layers().boxed_http_request())
+                .push_per_service(svc::layers().box_http_request())
                 .check_service::<Target>()
                 // Provides route configuration without pdestination overrides.
                 .push(profiles::Layer::without_overrides(
@@ -227,10 +227,10 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(metrics.http_handle_time.layer());
 
             let http_server = svc::stack(http_profile_cache)
-                .push_per_service(svc::layers().boxed_http_response())
+                .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
                 .push(fallback::Layer::new(http_target_cache.push_per_service(
-                    svc::layers().boxed_http_response().boxed_http_request(),
+                    svc::layers().box_http_response().box_http_request(),
                 )))
                 .check_service::<Target>()
                 // Ensures that the built service is ready before it is returned

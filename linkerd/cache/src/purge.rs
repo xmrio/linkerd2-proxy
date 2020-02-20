@@ -49,7 +49,6 @@ where
             Err(_) => unreachable!("purge hangup handle must not error"),
         };
 
-        trace!("Acquiring cache lock to purge");
         if let Async::Ready(mut cache) = self.cache.poll_acquire() {
             cache.poll_purge();
         }

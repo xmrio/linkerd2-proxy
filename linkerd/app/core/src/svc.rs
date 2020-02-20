@@ -1,8 +1,9 @@
 // Possibly unused, but useful during development.
 #![allow(dead_code)]
 
-pub use crate::proxy::{buffer, ready};
-use crate::{cache, proxy::http, trace, Error};
+pub use crate::proxy::{buffer, http, ready};
+use crate::{cache, trace, Error};
+use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
 pub use linkerd2_lock as lock;
 pub use linkerd2_stack::{
@@ -94,24 +95,23 @@ impl<L> Layers<L> {
         self.push(map_response::Layer::new(map_response))
     }
 
-    pub fn boxed_http<A, B>(self) -> Layers<Pair<L, http::boxed::Layer<A, B>>>
+    pub fn boxed<A, B>(self) -> Layers<Pair<L, boxed::Layer<A, B>>>
     where
         A: 'static,
-        B: hyper::body::Payload<Data = hyper::body::Chunk, Error = Error> + 'static,
+        B: 'static,
     {
-        self.push(http::boxed::Layer::new())
+        self.push(boxed::Layer::new())
     }
 
-    pub fn boxed_http_request<B>(self) -> Layers<Pair<L, http::box_request::Layer<B>>>
+    pub fn box_http_request<B>(self) -> Layers<Pair<L, http::boxed::request::Layer<B>>>
     where
-        B: hyper::body::Payload + Send + 'static,
-        B::Error: Into<Error> + 'static,
+        B: hyper::body::Payload + 'static,
     {
-        self.push(http::box_request::Layer::new())
+        self.push(http::boxed::request::Layer::new())
     }
 
-    pub fn boxed_http_response(self) -> Layers<Pair<L, http::box_response::Layer>> {
-        self.push(http::box_response::Layer)
+    pub fn box_http_response(self) -> Layers<Pair<L, http::boxed::response::Layer>> {
+        self.push(http::boxed::response::Layer::new())
     }
 
     pub fn push_oneshot(self) -> Layers<Pair<L, oneshot::Layer>> {
@@ -235,28 +235,27 @@ impl<S> Stack<S> {
         )
     }
 
-    pub fn boxed_http<A, B>(self) -> Stack<http::boxed::BoxedService<A>>
+    pub fn boxed<A>(self) -> Stack<boxed::BoxService<A, S::Response>>
     where
         A: 'static,
-        S: tower::Service<http::Request<A>, Response = http::Response<B>> + Send + 'static,
+        S: tower::Service<A> + Send + 'static,
+        S::Response: 'static,
         S::Future: Send + 'static,
         S::Error: Into<Error> + 'static,
-        B: hyper::body::Payload<Data = hyper::body::Chunk, Error = Error> + 'static,
     {
-        self.push(http::boxed::Layer::new())
+        self.push(boxed::Layer::new())
     }
 
-    pub fn boxed_http_request<B>(self) -> Stack<http::box_request::BoxRequest<S, B>>
+    pub fn box_http_request<B>(self) -> Stack<http::boxed::BoxRequest<S, B>>
     where
-        B: hyper::body::Payload + Send + 'static,
-        B::Error: Into<Error> + 'static,
+        B: hyper::body::Payload<Data = http::boxed::Data, Error = Error> + 'static,
         S: tower::Service<http::Request<http::boxed::Payload>>,
     {
-        self.push(http::box_request::Layer::new())
+        self.push(http::boxed::request::Layer::new())
     }
 
-    pub fn boxed_http_response(self) -> Stack<http::box_response::BoxResponse<S>> {
-        self.push(http::box_response::Layer)
+    pub fn box_http_response(self) -> Stack<http::boxed::BoxResponse<S>> {
+        self.push(http::boxed::response::Layer::new())
     }
 
     /// Validates that this stack serves T-typed targets.

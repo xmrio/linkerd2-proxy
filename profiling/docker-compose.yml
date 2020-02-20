@@ -4,18 +4,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile-iperf
-    command: ["iperf", "-s", "-p 5001"]
+    secrets:
+      - source: authorized_keys
+        target: /root/authorized_keys
 
   proxy:
     build:
       context: ..
       dockerfile: profiling/Dockerfile-proxy
     environment:
-      PROFILING_SUPPORT_SERVER: "${SERVER}"
+      SERVER:
+      SERVER_PORT:
       LINKERD2_PROXY_LOG: "${LINKERD2_PROXY_LOG}"
       PROXY_PERF:
+      PROXY_HEAP:
       NAME:
-    command: /usr/bin/run-proxy
     depends_on:
       - iperf
       - fortio
@@ -25,13 +28,28 @@ services:
       - type: bind
         source: "${OUT_DIR}"
         target: "/out"
+    secrets:
+      - source: proxy_key
+        target: /root/.ssh/id_ecdsa
+      - source: proxy_pubkey
+        target: /root/.ssh/id_ecdsa.pub
 
   fortio:
     build:
       context: .
       dockerfile: Dockerfile-fortio
-    command: ["fortio", "server"]
     volumes:
       - type: bind
         source: "${OUT_DIR}"
         target: "/out"
+    secrets:
+      - source: authorized_keys
+        target: /root/authorized_keys
+
+secrets:
+  authorized_keys:
+    file: "${TEST_KEY_DIR}/authorized_keys"
+  proxy_key:
+    file: "${TEST_KEY_DIR}/id_ecdsa"
+  proxy_pubkey:
+    file: "${TEST_KEY_DIR}/id_ecdsa.pub"

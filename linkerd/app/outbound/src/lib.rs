@@ -198,8 +198,11 @@ impl<A: OrigDstAddr> Config<A> {
             let http_balancer = http_endpoint
                 .clone()
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
-                .push_per_service(metrics.stack.layer(stack_labels("balance.endpoint")))
-                .push_per_service(http::box_request::Layer::new())
+                .push_per_service(
+                    svc::layers()
+                        .push(metrics.stack.layer(stack_labels("balance.endpoint")))
+                        .box_http_request(),
+                )
                 .push_spawn_ready()
                 .check_service::<Target<HttpEndpoint>>()
                 .push(discover)
@@ -222,9 +225,8 @@ impl<A: OrigDstAddr> Config<A> {
             // the stack cannot be shared directly.
             let http_forward = http_endpoint
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
-                .push_per_service(http::box_request::Layer::new())
                 .push_pending()
-                .push_per_service(svc::layers().push_lock())
+                .push_per_service(svc::layers().box_http_request().push_lock())
                 .push_per_service(metrics.stack.layer(stack_labels("forward.endpoint")))
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
@@ -240,12 +242,12 @@ impl<A: OrigDstAddr> Config<A> {
             let http_concrete = http_balancer_cache
                 .push_map_target(|c: Concrete<HttpEndpoint>| c.map(|l| l.map(|e| e.settings)))
                 .check_service::<Concrete<HttpEndpoint>>()
-                .push_per_service(svc::layers().boxed_http_response())
+                .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
                 .push(
                     fallback::Layer::new(
                         http_forward_cache
-                            .push_per_service(svc::layers().boxed_http_response())
+                            .push_per_service(svc::layers().box_http_response())
                             .into_inner(),
                     )
                     .with_predicate(is_discovery_rejected),
@@ -273,7 +275,7 @@ impl<A: OrigDstAddr> Config<A> {
             // may vary.
             let http_profile = http_concrete
                 .clone()
-                .push_per_service(http::box_request::Layer::new())
+                .push_per_service(svc::layers().box_http_request())
                 .check_service::<Concrete<HttpEndpoint>>()
                 // Provides route configuration. The profile service operates
                 // over `Concret` services. When overrides are in play, the
@@ -329,7 +331,7 @@ impl<A: OrigDstAddr> Config<A> {
             // Routes requests to their logical target.
             let http_logical_router = svc::stack(http_logical_profile_cache)
                 .check_service::<Logical<HttpEndpoint>>()
-                .push_per_service(svc::layers().boxed_http_response())
+                .push_per_service(svc::layers().box_http_response())
                 .push_make_ready()
                 .push(
                     fallback::Layer::new(
@@ -338,9 +340,7 @@ impl<A: OrigDstAddr> Config<A> {
                                 addr: inner.addr.clone(),
                                 inner,
                             })
-                            .push_per_service(
-                                svc::layers().boxed_http_response().boxed_http_request(),
-                            )
+                            .push_per_service(svc::layers().box_http_response().box_http_request())
                             .check_service::<Logical<HttpEndpoint>>()
                             .into_inner(),
                     )

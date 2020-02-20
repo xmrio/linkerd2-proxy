@@ -48,28 +48,40 @@ BRANCH_NAME=$(echo $BRANCH_NAME | sed -e 's/\//-/g')
 export RUN_NAME="$BRANCH_NAME $ID Iter: $ITERATIONS Dur: $DURATION Conns: $CONNECTIONS Streams: $GRPC_STREAMS"
 
 export OUT_DIR="../target/profile/$ID"
+export TEST_KEY_DIR="/tmp/$ID/ssh"
 status "Creating" "$OUT_DIR"
 
 mkdir -p "$OUT_DIR"
+mkdir -p "$TEST_KEY_DIR"
+ssh-keygen -f "$TEST_KEY_DIR/id_ecdsa" -t ecdsa -b 521 -N '' -q
+cat "$TEST_KEY_DIR/id_ecdsa.pub" > "$TEST_KEY_DIR/authorized_keys"
+chmod 644 "$TEST_KEY_DIR/authorized_keys"
 
 single_benchmark_run () {
   # run benchmark utilities in background, only proxy runs in foreground
   # run client
   if [ "$MODE" = "TCP" ]; then
-    export SERVER="iperf:$SERVER_PORT" && docker-compose up -d &> "$LOG"
+    SERVER="iperf" docker-compose up -d &> "$LOG"
     status "Running" "TCP $DIRECTION"
-    (docker-compose exec iperf \
-      linkerd-await \
-      --uri="http://proxy:4191/ready" \
-      -- \
-      iperf -t 6 -p "$PROXY_PORT" -c proxy) | tee "$OUT_DIR/$NAME.txt" &> "$LOG"
+    IPERF=$( ( (docker-compose exec iperf \
+        linkerd-await \
+        --uri="http://proxy:4191/ready" \
+        -- \
+        iperf -t 6 -p "$PROXY_PORT" -c proxy) | tee "$OUT_DIR/$NAME.txt") 2>&1 | tee "$LOG")
+
+    if [[ $? -ne 0 ]]; then
+      err "iperf failed:" "$IPERF"
+      exit 1
+    fi
+
     T=$(grep "/sec" "$OUT_DIR/$NAME.txt" | cut -d' ' -f12)
     if [ -z "$T" ]; then
       T="0"
     fi
     echo "TCP $DIRECTION, 0, 0, $RUN_NAME, 0, $T" >> "$OUT_DIR/summary.txt"
   else
-    export SERVER="fortio:$SERVER_PORT" && docker-compose up -d &> "$LOG"
+    SERVER="fortio" docker-compose up -d &> "$LOG"
+    docker-compose kill iperf &> "$LOG"
     RPS="$HTTP_RPS"
     XARG=""
     if [ "$MODE" = "gRPC" ]; then
@@ -83,7 +95,7 @@ single_benchmark_run () {
         for i in $(seq $ITERATIONS); do
           status "Running" "$MODE $DIRECTION Iteration: $i RPS: $r REQ_BODY_LEN: $l"
 
-          (docker-compose exec fortio \
+          FORTIO=$( (docker-compose exec fortio \
             linkerd-await \
             --uri="http://proxy:4191/ready" \
             -- \
@@ -97,7 +109,12 @@ single_benchmark_run () {
             -labels="$RUN_NAME" \
             -json="out/${NAME}_$r-rps.json" \
             -H "Host: transparency.test.svc.cluster.local" \
-            "http://proxy:${PROXY_PORT}") &> "$LOG"
+            "http://proxy:${PROXY_PORT}") 2>&1 | tee "$LOG")
+
+          if [[ $? -ne 0 ]]; then
+              err "fortio failed:" "$FORTIO"
+              exit 1
+          fi
 
           T=$(grep Value "$OUT_DIR/${NAME}_$r-rps.json" | tail -1 | cut  -d':' -f2)
           if [ -z "$T" ]; then
@@ -114,6 +131,7 @@ single_benchmark_run () {
   docker-compose exec proxy bash -c 'echo F | netcat 127.0.0.1 7777'
   if [ "$(docker wait profiling_proxy_1)" -gt 0 ]; then
     err "proxy failed! log output:" "$(docker logs profiling_proxy_1 2>&1)"
+    exit 1
   fi
 }
 

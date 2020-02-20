@@ -7,9 +7,6 @@ use linkerd2_identity as identity;
 
 pub mod add_header;
 pub mod balance;
-pub mod box_request;
-pub mod box_response;
-pub mod boxed;
 pub mod canonicalize;
 pub mod client;
 pub mod glue;
@@ -33,6 +30,7 @@ pub use self::{
     version::Version,
 };
 pub use http::{header, uri, Request, Response};
+pub use linkerd2_http_box as boxed;
 
 pub trait HasH2Reason {
     fn h2_reason(&self) -> Option<::h2::Reason>;

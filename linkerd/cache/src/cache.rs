@@ -187,7 +187,7 @@ mod tests {
         // Fill the cache
         rt.block_on(future::lazy(|| {
             let mut cache = match lock.poll_acquire() {
-                Ok(Async::Ready(cache)) => cache,
+                Async::Ready(cache) => cache,
                 _ => panic!("cache lock should be Ready"),
             };
 
@@ -203,7 +203,7 @@ mod tests {
         rt.block_on(sleep(Duration::from_millis(100))).unwrap();
 
         let cache = match lock.poll_acquire() {
-            Ok(Async::Ready(acquired)) => acquired,
+            Async::Ready(acquired) => acquired,
             _ => panic!("cache lock should be Ready"),
         };
         assert_eq!(cache.values.len(), 0);
@@ -222,7 +222,7 @@ mod tests {
         // Insert into the cache
         rt.block_on(future::lazy(|| {
             let mut cache = match lock.poll_acquire() {
-                Ok(Async::Ready(cache)) => cache,
+                Async::Ready(cache) => cache,
                 _ => panic!("cache lock should be Ready"),
             };
 
@@ -239,7 +239,7 @@ mod tests {
         // Access the value that was inserted
         rt.block_on(future::lazy(|| {
             let mut cache = match lock.poll_acquire() {
-                Ok(Async::Ready(cache)) => cache,
+                Async::Ready(cache) => cache,
                 _ => panic!("cache lock should be Ready"),
             };
             assert!(cache.access(&1).is_some());
@@ -255,7 +255,7 @@ mod tests {
         // retrievable
         rt.block_on(future::lazy(|| {
             let mut cache = match lock.poll_acquire() {
-                Ok(Async::Ready(acquired)) => acquired,
+                Async::Ready(acquired) => acquired,
                 _ => panic!("cache lock should be Ready"),
             };
             assert!(cache.access(&1).is_some());
