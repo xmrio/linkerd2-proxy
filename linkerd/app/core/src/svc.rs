@@ -220,22 +220,6 @@ impl<S> Stack<S> {
         self.push(http::insert::target::layer())
     }
 
-    pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<fallback::Fallback<S, F>> {
-        self.push(fallback::FallbackLayer::new(fallback))
-    }
-
-    pub fn push_fallback_with_predicate<F, P>(
-        self,
-        fallback: F,
-        predicate: P,
-    ) -> Stack<fallback::Fallback<S, F, P>>
-    where
-        F: Clone,
-        P: Fn(&Error) -> bool + Clone,
-    {
-        self.push(fallback::FallbackLayer::new(fallback).with_predicate(predicate))
-    }
-
     pub fn spawn_cache<T>(
         self,
         capacity: usize,
@@ -251,6 +235,22 @@ impl<S> Stack<S> {
                 .layer(self.0)
                 .spawn(),
         )
+    }
+
+    pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<fallback::Fallback<S, F>> {
+        self.push(fallback::FallbackLayer::new(fallback))
+    }
+
+    pub fn push_fallback_with_predicate<F, P>(
+        self,
+        fallback: F,
+        predicate: P,
+    ) -> Stack<fallback::Fallback<S, F, P>>
+    where
+        F: Clone,
+        P: Fn(&Error) -> bool + Clone,
+    {
+        self.push(fallback::FallbackLayer::new(fallback).with_predicate(predicate))
     }
 
     pub fn boxed<A>(self) -> Stack<boxed::BoxService<A, S::Response>>

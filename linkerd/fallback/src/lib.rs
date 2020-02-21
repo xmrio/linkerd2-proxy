@@ -5,9 +5,15 @@ use linkerd2_error::Error;
 use tower::util::{Either, Oneshot, ServiceExt};
 use tracing::debug;
 
-mod layer;
-
-pub use self::layer::FallbackLayer;
+/// A fallback layer composing two services.
+///
+/// If the future returned by the primary service fails with an error matching a
+/// given predicate, the fallback service is called. The result is returned in an `Either`.
+#[derive(Clone, Debug)]
+pub struct FallbackLayer<F, P = fn(&Error) -> bool> {
+    fallback: F,
+    predicate: P,
+}
 
 #[derive(Clone, Debug)]
 pub struct Fallback<I, F, P = fn(&Error) -> bool> {
@@ -17,8 +23,61 @@ pub struct Fallback<I, F, P = fn(&Error) -> bool> {
 }
 
 pub enum MakeFuture<A, B, P> {
-    A { a: A, b: Option<B>, predicate: P },
+    A {
+        primary: A,
+        fallback: Option<B>,
+        predicate: P,
+    },
     B(B),
+}
+
+// === impl FallbackLayer ===
+
+impl<B> FallbackLayer<B> {
+    pub fn new(fallback: B) -> Self {
+        let predicate: fn(&Error) -> bool = |_| true;
+        Self {
+            fallback,
+            predicate,
+        }
+    }
+
+    /// Returns a `Layer` that uses the given `predicate` to determine whether
+    /// to fall back.
+    pub fn with_predicate<P>(self, predicate: P) -> FallbackLayer<B, P>
+    where
+        P: Fn(&Error) -> bool + Clone,
+    {
+        FallbackLayer {
+            fallback: self.fallback,
+            predicate,
+        }
+    }
+
+    /// Returns a `Layer` that falls back if the error or its source is of
+    /// type `E`.
+    pub fn on_error<E>(self) -> FallbackLayer<B>
+    where
+        E: std::error::Error + 'static,
+    {
+        self.with_predicate(|e| e.is::<E>() || e.source().map(|s| s.is::<E>()).unwrap_or(false))
+    }
+}
+
+impl<A, B, P> tower::layer::Layer<A> for FallbackLayer<B, P>
+where
+    B: Clone,
+    P: Clone,
+{
+    type Service = Fallback<A, B, P>;
+
+    fn layer(&self, inner: A) -> Self::Service {
+        Self::Service {
+            inner,
+            fallback: self.fallback.clone(),
+            predicate: self.predicate.clone(),
+        }
+    }
 }
 
 // === impl Fallback ===
@@ -43,8 +102,8 @@ where
 
     fn call(&mut self, target: T) -> Self::Future {
         MakeFuture::A {
-            a: self.inner.call(target.clone()),
-            b: Some(self.fallback.clone().oneshot(target)),
+            primary: self.inner.call(target.clone()),
+            fallback: Some(self.fallback.clone().oneshot(target)),
             predicate: self.predicate.clone(),
         }
     }
@@ -67,10 +126,10 @@ where
         loop {
             *self = match self {
                 MakeFuture::A {
-                    ref mut a,
-                    ref mut b,
+                    ref mut primary,
+                    ref mut fallback,
                     ref predicate,
-                } => match a.poll() {
+                } => match primary.poll() {
                     Ok(ok) => return Ok(ok.map(Either::A)),
                     Err(e) => {
                         let error = e.into();
@@ -79,7 +138,7 @@ where
                         }
 
                         debug!(%error, "Falling back");
-                        MakeFuture::B(b.take().unwrap())
+                        MakeFuture::B(fallback.take().unwrap())
                     }
                 },
                 MakeFuture::B(ref mut b) => {
