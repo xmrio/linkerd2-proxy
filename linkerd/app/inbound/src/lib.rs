@@ -131,7 +131,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(trace::layer(
                     |endpoint: &Endpoint| info_span!("endpoint", peer.addr = %endpoint.addr),
                 ))
-                .push_per_make(metrics.stack.layer(stack_labels("endpoint")))
+                .push_layer_response(metrics.stack.layer(stack_labels("endpoint")))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .makes::<Endpoint>()
                 .push(router::Layer::new(
@@ -151,7 +151,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(insert::target::layer())
                 .push(metrics.http_route.into_layer::<classify::Response>())
                 .push(classify::Layer::new())
-                .push_per_make(metrics.stack.layer(stack_labels("route")))
+                .push_layer_response(metrics.stack.layer(stack_labels("route")))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract);
 
             // A per-`DstAddr` stack that does the following:
@@ -165,7 +165,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .push(profiles::router::layer(profiles_client, dst_route_layer))
                 .push(strip_header::request::layer(DST_OVERRIDE_HEADER))
-                .push_per_make(metrics.stack.layer(stack_labels("logical")))
+                .push_layer_response(metrics.stack.layer(stack_labels("logical")))
                 .push(trace::layer(
                     |dst: &DstAddr| info_span!("logical", dst = %dst.dst_logical()),
                 ));
@@ -250,9 +250,9 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(insert::layer(move || {
                     DispatchDeadline::after(buffer.dispatch_timeout)
                 }))
-                .push_per_make(metrics.http_errors)
-                .push_per_make(errors::layer())
-                .push_per_make(metrics.stack.layer(stack_labels("source")))
+                .push_layer_response(metrics.http_errors)
+                .push_layer_response(errors::layer())
+                .push_layer_response(metrics.stack.layer(stack_labels("source")))
                 .push(trace::layer(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
@@ -268,9 +268,9 @@ impl<A: OrigDstAddr> Config<A> {
 
             let forward_tcp = tcp::Forward::new(
                 svc::stack(connect_stack)
-                    .push(svc::map_target::layer(|meta: tls::accept::Meta| {
+                    .push_map_target(|meta: tls::accept::Meta| {
                         Endpoint::from(meta.addrs.target_addr())
-                    }))
+                    })
                     .into_inner(),
             );
 

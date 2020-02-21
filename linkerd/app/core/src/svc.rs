@@ -2,10 +2,8 @@ use crate::proxy::{buffer, http, pending};
 use crate::Error;
 pub use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
-pub use linkerd2_fallback as fallback;
 pub use linkerd2_router::Make;
-pub use linkerd2_stack::{self as stack, layer, map_target, LayerExt, Shared};
-pub use linkerd2_timeout::stack as timeout;
+pub use linkerd2_stack::{self as stack, fallback, layer, Shared};
 use std::time::Duration;
 use tower::layer::util::{Identity, Stack as Pair};
 pub use tower::layer::Layer;
@@ -54,8 +52,8 @@ impl<L> Layers<L> {
         self.push_pending().push(buffer::layer(bound, d))
     }
 
-    pub fn push_per_make<T: Clone>(self, layer: T) -> Layers<Pair<L, stack::per_make::Layer<T>>> {
-        self.push(stack::per_make::layer(layer))
+    pub fn push_layer_response<U>(self, layer: U) -> Layers<Pair<L, stack::LayerResponseLayer<U>>> {
+        self.push(stack::LayerResponseLayer::new(layer))
     }
 
     pub fn push_spawn_ready(self) -> Layers<Pair<L, SpawnReadyLayer>> {
@@ -115,8 +113,8 @@ impl<S> Stack<S> {
         self.push_pending().push(buffer::layer(bound, d))
     }
 
-    pub fn push_per_make<L: Clone>(self, layer: L) -> Stack<stack::per_make::PerMake<L, S>> {
-        self.push(stack::per_make::layer(layer))
+    pub fn push_layer_response<L>(self, layer: L) -> Stack<stack::LayerResponse<L, S>> {
+        self.push(stack::LayerResponseLayer::new(layer))
     }
 
     pub fn push_spawn_ready(self) -> Stack<tower_spawn_ready::MakeSpawnReady<S>> {
@@ -175,6 +173,10 @@ impl<S> Stack<S> {
 
     pub fn box_http_response(self) -> Stack<http::boxed::BoxResponse<S>> {
         self.push(http::boxed::response::Layer::new())
+    }
+
+    pub fn push_map_target<M: Clone>(self, map: M) -> Stack<stack::MapTargetService<S, M>> {
+        self.push(stack::MapTargetLayer::new(map))
     }
 
     /// Validates that this stack serves T-typed targets.

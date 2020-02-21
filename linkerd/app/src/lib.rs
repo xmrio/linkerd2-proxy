@@ -113,8 +113,7 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
             use linkerd2_app_core::{
                 classify, control,
                 proxy::grpc,
-                reconnect,
-                svc::{self, LayerExt},
+                reconnect, svc,
                 transport::{connect, tls},
             };
 
@@ -135,7 +134,7 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                         move |_| Ok(backoff.stream())
                     }))
                     .push(metrics.into_layer::<classify::Response>())
-                    .push(grpc::req_body_as_payload::layer().per_make())
+                    .push_layer_response(grpc::req_body_as_payload::layer())
                     .push(control::add_origin::layer())
                     .push_buffer_pending(
                         dst.control.buffer.max_in_flight,

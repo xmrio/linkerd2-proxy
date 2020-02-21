@@ -172,7 +172,7 @@ impl<A: OrigDstAddr> Config<A> {
             // used as the server name when connecting to the endpoint.
             let orig_dst_router_stack = endpoint_stack
                 .clone()
-                .push_per_make(metrics.stack.layer(stack_labels("fallback.endpoint")))
+                .push_layer_response(metrics.stack.layer(stack_labels("fallback.endpoint")))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .push(router::Layer::new(
                     router::Config::new(router_capacity, router_max_idle_age),
@@ -184,7 +184,7 @@ impl<A: OrigDstAddr> Config<A> {
             const DISCOVER_UPDATE_BUFFER_CAPACITY: usize = 10;
             let balancer_stack = endpoint_stack
                 .serves::<Endpoint>()
-                .push_per_make(metrics.stack.layer(stack_labels("balance.endpoint")))
+                .push_layer_response(metrics.stack.layer(stack_labels("balance.endpoint")))
                 .push_spawn_ready()
                 .push(discover::Layer::new(
                     DISCOVER_UPDATE_BUFFER_CAPACITY,
@@ -198,9 +198,9 @@ impl<A: OrigDstAddr> Config<A> {
             // application-selected original destination.
             let distributor = balancer_stack
                 .serves::<DstAddr>()
-                .push_per_make(svc::layers().box_http_response())
+                .push_layer_response(svc::layers().box_http_response())
                 .push_fallback(
-                    orig_dst_router_stack.push_per_make(svc::layers().box_http_response()),
+                    orig_dst_router_stack.push_layer_response(svc::layers().box_http_response()),
                 )
                 .push(trace::layer(
                     |dst: &DstAddr| info_span!("concrete", dst.concrete = %dst.dst_concrete()),
@@ -253,7 +253,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(trace::layer(
                     |dst: &DstAddr| info_span!("logical", dst.logical = %dst.dst_logical()),
                 ))
-                .push_per_make(metrics.stack.layer(stack_labels("logical.dst")))
+                .push_layer_response(metrics.stack.layer(stack_labels("logical.dst")))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .push(router::Layer::new(
                     router::Config::new(router_capacity, router_max_idle_age),
@@ -293,7 +293,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(http::strip_header::request::layer(DST_OVERRIDE_HEADER))
                 .push(http::insert::target::layer())
                 .push(trace::layer(|addr: &Addr| info_span!("addr", %addr)))
-                .push_per_make(metrics.stack.layer(stack_labels("addr")))
+                .push_layer_response(metrics.stack.layer(stack_labels("addr")))
                 .push_buffer_pending(buffer.max_in_flight, DispatchDeadline::extract)
                 .push(router::Layer::new(
                     router::Config::new(router_capacity, router_max_idle_age),
@@ -326,12 +326,12 @@ impl<A: OrigDstAddr> Config<A> {
                     DispatchDeadline::after(buffer.dispatch_timeout)
                 }))
                 .push(http::insert::target::layer())
-                .push_per_make(metrics.http_errors)
-                .push_per_make(errors::layer())
+                .push_layer_response(metrics.http_errors)
+                .push_layer_response(errors::layer())
                 .push(trace::layer(
                     |src: &tls::accept::Meta| info_span!("source", target.addr = %src.addrs.target_addr()),
                 ))
-                .push_per_make(metrics.stack.layer(stack_labels("source")))
+                .push_layer_response(metrics.stack.layer(stack_labels("source")))
                 .push(trace_context::layer(span_sink.map(|span_sink| {
                     SpanConverter::server(span_sink, trace_labels())
                 })))
@@ -339,9 +339,9 @@ impl<A: OrigDstAddr> Config<A> {
 
             let forward_tcp = tcp::Forward::new(
                 svc::stack(connect_stack)
-                    .push(svc::map_target::layer(|meta: tls::accept::Meta| {
+                    .push_map_target(|meta: tls::accept::Meta| {
                         Endpoint::from(meta.addrs.target_addr())
-                    }))
+                    })
                     .into_inner(),
             );
 
