@@ -5,7 +5,8 @@ pub use linkerd2_app_core::proxy::identity::{
 use linkerd2_app_core::{
     classify,
     config::{ControlAddr, ControlConfig},
-    control, dns, proxy, reconnect, svc,
+    control, dns, proxy, reconnect,
+    svc::{self, NewService},
     transport::{connect, tls},
     ControlHttpMetrics as Metrics, Error, Never,
 };
@@ -55,12 +56,13 @@ impl Config {
                     .push(metrics.into_layer::<classify::Response>())
                     .push_layer_response(proxy::grpc::req_body_as_payload::layer())
                     .push(control::add_origin::layer())
-                    .push_buffer_pending(
+                    .into_new_service()
+                    .push_buffer(
                         control.buffer.max_in_flight,
                         control.buffer.dispatch_timeout,
                     )
                     .into_inner()
-                    .make(addr.clone());
+                    .new_service(addr.clone());
 
                 // Save to be spawned on an auxiliary runtime.
                 let task = {

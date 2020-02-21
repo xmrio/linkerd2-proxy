@@ -52,7 +52,7 @@ where
 {
     type Response = L::Service;
     type Error = M::Error;
-    type Future = MakeFuture<L, M::Future>;
+    type Future = LayerResponse<L, M::Future>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         self.inner.poll_ready()
@@ -60,7 +60,7 @@ where
 
     fn call(&mut self, target: T) -> Self::Future {
         let inner = self.inner.call(target);
-        MakeFuture {
+        Self::Future {
             layer: self.layer.clone(),
             inner,
         }

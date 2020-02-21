@@ -2,7 +2,8 @@ use crate::{dns, identity::LocalIdentity};
 use futures::{future, Future};
 use linkerd2_app_core::{
     config::{ControlAddr, ControlConfig},
-    control, proxy, reconnect, svc,
+    control, proxy, reconnect,
+    svc::{self, NewService},
     transport::{connect, tls},
     Error,
 };
@@ -62,12 +63,13 @@ impl Config {
                     }))
                     .push_layer_response(proxy::grpc::req_body_as_payload::layer())
                     .push(control::add_origin::layer())
-                    .push_buffer_pending(
+                    .into_new_service()
+                    .push_buffer(
                         control.buffer.max_in_flight,
                         control.buffer.dispatch_timeout,
                     )
                     .into_inner()
-                    .make(addr.clone());
+                    .new_service(addr.clone());
 
                 let (span_sink, spans_rx) = mpsc::channel(Self::SPAN_BUFFER_CAPACITY);
 

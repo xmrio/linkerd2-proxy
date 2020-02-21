@@ -1,8 +1,19 @@
+use crate::FutureService;
+use tower::util::{Oneshot, ServiceExt};
+
 /// Immediately and infalliby creates (usually) a Service.
 pub trait NewService<T> {
     type Service;
 
     fn new_service(&self, target: T) -> Self::Service;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FromMakeServiceLayer(());
+
+#[derive(Clone, Copy, Debug)]
+pub struct FromMakeService<S> {
+    make_service: S,
 }
 
 impl<F, T, S> NewService<T> for F
@@ -13,5 +24,24 @@ where
 
     fn new_service(&self, target: T) -> Self::Service {
         (self)(target)
+    }
+}
+
+impl<S> tower::layer::Layer<S> for FromMakeServiceLayer {
+    type Service = FromMakeService<S>;
+
+    fn layer(&self, make_service: S) -> Self::Service {
+        Self::Service { make_service }
+    }
+}
+
+impl<T, S> NewService<T> for FromMakeService<S>
+where
+    S: tower::Service<T> + Clone,
+{
+    type Service = FutureService<Oneshot<S, T>, S::Response>;
+
+    fn new_service(&self, target: T) -> Self::Service {
+        FutureService::new(self.make_service.clone().oneshot(target))
     }
 }

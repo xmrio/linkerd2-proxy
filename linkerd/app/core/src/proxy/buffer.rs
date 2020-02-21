@@ -1,7 +1,7 @@
 use crate::svc;
 use futures::{try_ready, Async, Future, Poll};
 use linkerd2_error::Error;
-use linkerd2_router as rt;
+use linkerd2_stack::NewService;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -151,41 +151,21 @@ where
     }
 }
 
-impl<T, M, D, Req> rt::Make<T> for Make<M, D, Req>
+impl<T, M, D, Req> NewService<T> for Make<M, D, Req>
 where
     T: fmt::Display + Clone + Send + Sync + 'static,
-    M: rt::Make<T>,
-    M::Value: svc::Service<Req> + Send + 'static,
-    <M::Value as svc::Service<Req>>::Future: Send,
-    <M::Value as svc::Service<Req>>::Error: Into<Error>,
+    M: NewService<T>,
+    M::Service: svc::Service<Req> + Send + 'static,
+    <M::Service as svc::Service<Req>>::Future: Send,
+    <M::Service as svc::Service<Req>>::Error: Into<Error>,
     D: Deadline<Req>,
     Req: Send + 'static,
 {
-    type Value = Enqueue<M::Value, D, Req>;
+    type Service = Enqueue<M::Service, D, Req>;
 
-    fn make(&self, target: &T) -> Self::Value {
+    fn new_service(&self, target: T) -> Self::Service {
         Enqueue::new(
-            self.inner.make(target),
-            self.deadline.clone(),
-            self.capacity,
-        )
-    }
-}
-
-impl<M, D, Req> Make<M, D, Req> {
-    /// Creates a buffer immediately.
-    pub fn make<T>(&self, target: T) -> Enqueue<M::Value, D, Req>
-    where
-        T: fmt::Display + Clone + Send + Sync + 'static,
-        M: rt::Make<T>,
-        M::Value: svc::Service<Req> + Send + 'static,
-        <M::Value as svc::Service<Req>>::Future: Send,
-        <M::Value as svc::Service<Req>>::Error: Into<Error>,
-        Req: Send + 'static,
-        D: Deadline<Req> + Clone,
-    {
-        Enqueue::new(
-            self.inner.make(&target),
+            self.inner.new_service(target),
             self.deadline.clone(),
             self.capacity,
         )
