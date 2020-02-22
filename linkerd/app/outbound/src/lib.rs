@@ -331,12 +331,15 @@ impl<A: OrigDstAddr> Config<A> {
                     DispatchDeadline::after(buffer.dispatch_timeout)
                 }))
                 .push(http::insert::target::layer())
-                .push_layer_response(metrics.http_errors)
-                .push_layer_response(errors::layer())
+                .push_layer_response(
+                    svc::layers()
+                        .push(metrics.http_errors)
+                        .push(errors::layer())
+                        .push(metrics.stack.layer(stack_labels("source")))
+                )
                 .push(trace::layer(
                     |src: &tls::accept::Meta| info_span!("source", target.addr = %src.addrs.target_addr()),
                 ))
-                .push_layer_response(metrics.stack.layer(stack_labels("source")))
                 .push(trace_context::layer(span_sink.map(|span_sink| {
                     SpanConverter::server(span_sink, trace_labels())
                 })))

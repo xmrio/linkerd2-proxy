@@ -254,9 +254,12 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(insert::layer(move || {
                     DispatchDeadline::after(buffer.dispatch_timeout)
                 }))
-                .push_layer_response(metrics.http_errors)
-                .push_layer_response(errors::layer())
-                .push_layer_response(metrics.stack.layer(stack_labels("source")))
+                .push_layer_response(
+                    svc::layers()
+                        .push(metrics.http_errors)
+                        .push(errors::layer())
+                        .push(metrics.stack.layer(stack_labels("source"))),
+                )
                 .push(trace::layer(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
