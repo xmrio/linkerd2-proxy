@@ -8,13 +8,17 @@ pub trait NewService<T> {
     fn new_service(&self, target: T) -> Self::Service;
 }
 
+/// A Layer that modifies inner `MakeService`s to be exposd as a `NewService`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FromMakeServiceLayer(());
 
+/// Modifies inner `MakeService`s to be exposd as a `NewService`.
 #[derive(Clone, Copy, Debug)]
 pub struct FromMakeService<S> {
     make_service: S,
 }
+
+// === impl NewService ===
 
 impl<F, T, S> NewService<T> for F
 where
@@ -27,6 +31,8 @@ where
     }
 }
 
+// === impl FromMakeServiceLayer ===
+
 impl<S> tower::layer::Layer<S> for FromMakeServiceLayer {
     type Service = FromMakeService<S>;
 
@@ -34,6 +40,8 @@ impl<S> tower::layer::Layer<S> for FromMakeServiceLayer {
         Self::Service { make_service }
     }
 }
+
+// === impl FromMakeService ===
 
 impl<T, S> NewService<T> for FromMakeService<S>
 where

@@ -352,8 +352,8 @@ where
 
 #[cfg(test)]
 mod test_util {
-    use linkerd2_stack::NewService;
     use futures::{future, Async, Poll};
+    use linkerd2_stack::NewService;
     use std::cell::Cell;
     use std::fmt;
     use std::rc::Rc;
@@ -475,10 +475,10 @@ mod test_util {
 
 #[cfg(test)]
 mod tests {
-    use linkerd2_stack::NewService;
     use super::{error, Router};
     use crate::test_util::*;
     use futures::Future;
+    use linkerd2_stack::NewService;
     use std::time::Duration;
     use std::usize;
     use tower::Service;
