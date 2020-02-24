@@ -202,6 +202,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_fallback(
                     orig_dst_router_stack.push_per_make(svc::layers().box_http_response()),
                 )
+                .push(http::header_from_target::layer("l5d-dst-concrete"))
                 .push(trace::layer(
                     |dst: &DstAddr| info_span!("concrete", dst.concrete = %dst.dst_concrete()),
                 ));
