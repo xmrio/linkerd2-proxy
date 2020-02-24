@@ -61,10 +61,10 @@ impl Config {
                         let backoff = control.connect.backoff;
                         move |_| Ok(backoff.stream())
                     }))
-                    .push_per_service(proxy::grpc::req_body_as_payload::layer())
+                    .push_on_response(proxy::grpc::req_body_as_payload::layer())
                     .push(control::add_origin::Layer::new())
-                    .push_pending()
-                    .push_per_service(svc::layers().push_lock())
+                    .into_new_service()
+                    .push_on_response(svc::layers().push_lock())
                     .check_new_service::<ControlAddr>()
                     .into_inner()
                     .new_service(addr.clone());

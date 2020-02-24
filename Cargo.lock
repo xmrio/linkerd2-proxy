@@ -635,7 +635,6 @@ dependencies = [
  "linkerd2-error-metrics",
  "linkerd2-error-respond",
  "linkerd2-exp-backoff",
- "linkerd2-fallback",
  "linkerd2-http-classify",
  "linkerd2-http-metrics",
  "linkerd2-lock",
@@ -869,16 +868,6 @@ dependencies = [
  "quickcheck",
  "rand 0.7.2",
  "tokio-timer",
-]
-
-[[package]]
-name = "linkerd2-fallback"
-version = "0.1.0"
-dependencies = [
- "futures",
- "linkerd2-error",
- "tower",
- "tracing",
 ]
 
 [[package]]
@@ -1300,6 +1289,7 @@ dependencies = [
  "futures",
  "linkerd2-error",
  "tower",
+ "tracing",
 ]
 
 [[package]]

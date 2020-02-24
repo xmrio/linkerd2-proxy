@@ -132,7 +132,7 @@ impl<A: OrigDstAddr> Config<A> {
                 let observability = svc::layers()
                     .push(tap_layer.clone())
                     .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                    .push_per_service(trace_context::layer(
+                    .push_on_response(trace_context::layer(
                         span_sink
                             .clone()
                             .map(|sink| SpanConverter::client(sink, trace_labels())),
@@ -141,7 +141,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // Checks the headers to validate that a client-specified required
                 // identity matches the configured identity.
                 let identity_headers = svc::layers()
-                    .push_per_service(
+                    .push_on_response(
                         svc::layers()
                             .push(http::strip_header::response::layer(L5D_REMOTE_IP))
                             .push(http::strip_header::response::layer(L5D_SERVER_ID))
@@ -198,7 +198,7 @@ impl<A: OrigDstAddr> Config<A> {
             let http_balancer = http_endpoint
                 .clone()
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
-                .push_per_service(
+                .push_on_response(
                     svc::layers()
                         .push(metrics.stack.layer(stack_labels("balance.endpoint")))
                         .box_http_request(),
@@ -206,10 +206,10 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_spawn_ready()
                 .check_service::<Target<HttpEndpoint>>()
                 .push(discover)
-                .push_per_service(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
-                .push_pending()
+                .push_on_response(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
+                .into_new_service()
                 // Shares the balancer, ensuring discovery errors are propagated.
-                .push_per_service(
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("balance"))),
@@ -225,9 +225,9 @@ impl<A: OrigDstAddr> Config<A> {
             // the stack cannot be shared directly.
             let http_forward = http_endpoint
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
-                .push_pending()
-                .push_per_service(svc::layers().box_http_request().push_lock())
-                .push_per_service(metrics.stack.layer(stack_labels("forward.endpoint")))
+                .into_new_service()
+                .push_on_response(svc::layers().box_http_request().push_lock())
+                .push_on_response(metrics.stack.layer(stack_labels("forward.endpoint")))
                 .push_trace(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
                 });
@@ -242,11 +242,11 @@ impl<A: OrigDstAddr> Config<A> {
             let http_concrete = http_balancer_cache
                 .push_map_target(|c: Concrete<HttpEndpoint>| c.map(|l| l.map(|e| e.settings)))
                 .check_service::<Concrete<HttpEndpoint>>()
-                .push_per_service(svc::layers().box_http_response())
+                .push_on_response(svc::layers().box_http_response())
                 .push_make_ready()
                 .push_fallback_with_predicate(
                     http_forward_cache
-                        .push_per_service(svc::layers().box_http_response())
+                        .push_on_response(svc::layers().box_http_response())
                         .into_inner(),
                     is_discovery_rejected,
                 )
@@ -273,7 +273,7 @@ impl<A: OrigDstAddr> Config<A> {
             // may vary.
             let http_profile = http_concrete
                 .clone()
-                .push_per_service(svc::layers().box_http_request())
+                .push_on_response(svc::layers().box_http_request())
                 .check_service::<Concrete<HttpEndpoint>>()
                 // Provides route configuration. The profile service operates
                 // over `Concret` services. When overrides are in play, the
@@ -285,14 +285,14 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_make_service::<Profile, Concrete<HttpEndpoint>>()
                 // Use the `Logical` target as a `Concrete` target. It may be
                 // overridden by the profile layer.
-                .push_per_service(svc::map_target::Layer::new(
-                    |inner: Logical<HttpEndpoint>| Concrete {
+                .push_on_response(
+                    svc::layers().push_map_target(|inner: Logical<HttpEndpoint>| Concrete {
                         addr: inner.addr.clone(),
                         inner,
-                    },
-                ))
-                .push_pending()
-                .push_per_service(
+                    }),
+                )
+                .into_new_service()
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("profile"))),
@@ -311,7 +311,7 @@ impl<A: OrigDstAddr> Config<A> {
             // For example, a client may send requests to `foo` or `foo.ns`; and
             // the canonical form of these names is `foo.ns.svc.cluster.local
             let dns_refine = svc::stack(dns_resolver.into_make_refine())
-                .push_per_service(
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("canonicalize"))),
@@ -329,7 +329,7 @@ impl<A: OrigDstAddr> Config<A> {
             // Routes requests to their logical target.
             let http_logical_router = svc::stack(http_logical_profile_cache)
                 .check_service::<Logical<HttpEndpoint>>()
-                .push_per_service(svc::layers().box_http_response())
+                .push_on_response(svc::layers().box_http_response())
                 .push_make_ready()
                 .push_fallback_with_predicate(
                     http_concrete
@@ -337,7 +337,7 @@ impl<A: OrigDstAddr> Config<A> {
                             addr: inner.addr.clone(),
                             inner,
                         })
-                        .push_per_service(svc::layers().box_http_response().box_http_request())
+                        .push_on_response(svc::layers().box_http_response().box_http_request())
                         .check_service::<Logical<HttpEndpoint>>()
                         .into_inner(),
                     is_discovery_rejected,
@@ -350,7 +350,7 @@ impl<A: OrigDstAddr> Config<A> {
                     dns_refine_cache,
                     canonicalize_timeout,
                 ))
-                .push_per_service(
+                .push_on_response(
                     // Strips headers that may be set by this proxy.
                     svc::layers()
                         .push(http::strip_header::request::layer(L5D_CLIENT_ID))
@@ -387,8 +387,8 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(router::Layer::new(LogicalPerRequest::from))
                 // Used by tap.
                 .push_http_insert_target()
-                .push_per_service(http_admit_request)
-                .push_per_service(metrics.stack.layer(stack_labels("source")))
+                .push_on_response(http_admit_request)
+                .push_on_response(metrics.stack.layer(stack_labels("source")))
                 .push_trace(
                     |src: &tls::accept::Meta| {
                         info_span!("source", target.addr = %src.addrs.target_addr())

@@ -114,8 +114,8 @@ impl<A: OrigDstAddr> Config<A> {
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())
                 }))
-                .push_pending()
-                .push_per_service(
+                .into_new_service()
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("endpoint"))),
@@ -135,7 +135,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(tap_layer)
                 // Records metrics for each `Target`.
                 .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                .push_per_service(trace_context::layer(
+                .push_on_response(trace_context::layer(
                     span_sink
                         .clone()
                         .map(|span_sink| SpanConverter::client(span_sink, trace_labels())),
@@ -158,8 +158,8 @@ impl<A: OrigDstAddr> Config<A> {
                 // absolute-form on the outbound side.
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
-                .push_pending()
-                .push_per_service(
+                .into_new_service()
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("target"))),
@@ -173,15 +173,15 @@ impl<A: OrigDstAddr> Config<A> {
             // resolutions are shared even as the type of request may vary.
             let http_profile_cache = http_target_cache
                 .clone()
-                .push_per_service(svc::layers().box_http_request())
+                .push_on_response(svc::layers().box_http_request())
                 .check_service::<Target>()
                 // Provides route configuration without pdestination overrides.
                 .push(profiles::Layer::without_overrides(
                     profiles_client,
                     http_profile_route_proxy.into_inner(),
                 ))
-                .push_pending()
-                .push_per_service(
+                .into_new_service()
+                .push_on_response(
                     svc::layers()
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("profile"))),
@@ -227,11 +227,11 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(metrics.http_handle_time.layer());
 
             let http_server = svc::stack(http_profile_cache)
-                .push_per_service(svc::layers().box_http_response())
+                .push_on_response(svc::layers().box_http_response())
                 .push_make_ready()
                 .push_fallback(
                     http_target_cache
-                        .push_per_service(svc::layers().box_http_response().box_http_request()),
+                        .push_on_response(svc::layers().box_http_response().box_http_request()),
                 )
                 .check_service::<Target>()
                 // Ensures that the built service is ready before it is returned
@@ -242,7 +242,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_timeout(service_acquisition_timeout)
                 // Removes the override header after it has been used to
                 // determine a reuquest target.
-                .push_per_service(strip_header::request::layer(DST_OVERRIDE_HEADER))
+                .push_on_response(strip_header::request::layer(DST_OVERRIDE_HEADER))
                 // Routes each request to a target, obtains a service for that
                 // target, and dispatches the request.
                 .push(trace::Layer::from_target())
@@ -250,10 +250,10 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_new_service::<tls::accept::Meta>()
                 // Used by tap.
                 .push_http_insert_target()
-                .push_per_service(http_strip_headers)
-                .push_per_service(http_admit_request)
-                .push_per_service(http_server_observability)
-                .push_per_service(metrics.stack.layer(stack_labels("source")))
+                .push_on_response(http_strip_headers)
+                .push_on_response(http_admit_request)
+                .push_on_response(http_server_observability)
+                .push_on_response(metrics.stack.layer(stack_labels("source")))
                 .push_trace(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",

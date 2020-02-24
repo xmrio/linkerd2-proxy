@@ -4,11 +4,10 @@ pub use crate::proxy::{buffer, http, ready};
 use crate::{cache, trace, Error};
 use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
-pub use linkerd2_fallback as fallback;
 pub use linkerd2_lock as lock;
 pub use linkerd2_stack::{
-    self as stack, layer, map_response, map_target, new_service, oneshot, pending, per_service,
-    NewService,
+    self as stack, fallback, layer, map_response, map_target, new_service, on_response, oneshot,
+    pending, NewService,
 };
 pub use linkerd2_timeout as timeout;
 use std::time::Duration;
@@ -52,17 +51,28 @@ impl<L> Layers<L> {
         Layers(Pair::new(self.0, outer))
     }
 
-    /// Buffer requests when when the next layer is out of capacity.
-    pub fn push_pending(self) -> Layers<Pair<L, pending::Layer>> {
-        self.push(pending::layer())
+    pub fn push_map_target<M: Clone>(
+        self,
+        map_target: M,
+    ) -> Layers<Pair<L, map_target::MapTargetLayer<M>>> {
+        self.push(map_target::MapTargetLayer::new(map_target))
     }
 
-    /// Buffer requests when when the next layer is out of capacity.
+    /// Wraps an inner `MakeService` to be a `NewService`.
+    pub fn push_into_new_service(self) -> Layers<Pair<L, new_service::FromMakeServiceLayer>> {
+        self.push(new_service::FromMakeServiceLayer::default())
+    }
+
+    /// Buffers requests in an mpsc, spawning the inner service onto a dedicated task.
     pub fn push_buffer<Req>(self, bound: usize) -> Layers<Pair<L, buffer::Layer<Req>>>
     where
         Req: Send + 'static,
     {
         self.push(buffer::Layer::new(bound))
+    }
+
+    pub fn push_on_response<U>(self, layer: U) -> Layers<Pair<L, stack::OnResponseLayer<U>>> {
+        self.push(stack::OnResponseLayer::new(layer))
     }
 
     pub fn push_spawn_ready(self) -> Layers<Pair<L, SpawnReadyLayer>> {
@@ -119,10 +129,6 @@ impl<L> Layers<L> {
         self.push(oneshot::Layer::new())
     }
 
-    pub fn push_per_service<O: Clone>(self, layer: O) -> Layers<Pair<L, per_service::Layer<O>>> {
-        self.push(per_service::layer(layer))
-    }
-
     pub fn push_trace<G: Clone>(self, get_span: G) -> Layers<Pair<L, trace::layer::Layer<G>>> {
         self.push(trace::Layer::new(get_span))
     }
@@ -145,16 +151,17 @@ impl<S> Stack<S> {
     pub fn push_map_target<M: Clone>(
         self,
         map_target: M,
-    ) -> Stack<map_target::MakeMapTarget<S, M>> {
-        self.push(map_target::Layer::new(map_target))
+    ) -> Stack<map_target::MapTargetService<S, M>> {
+        self.push(map_target::MapTargetLayer::new(map_target))
     }
 
     pub fn push_trace<G: Clone>(self, get_span: G) -> Stack<trace::layer::MakeSpan<G, S>> {
         self.push(trace::Layer::new(get_span))
     }
 
-    pub fn push_pending(self) -> Stack<pending::NewPending<S>> {
-        self.push(pending::layer())
+    /// Wraps an inner `MakeService` to be a `NewService`.
+    pub fn into_new_service(self) -> Stack<new_service::FromMakeService<S>> {
+        self.push(new_service::FromMakeServiceLayer::default())
     }
 
     pub fn push_make_ready<Req>(self) -> Stack<ready::MakeReady<S, Req>> {
@@ -171,9 +178,15 @@ impl<S> Stack<S> {
         Req: Send + 'static,
         S: Service<Req> + Send + 'static,
         S::Error: Into<Error> + Send + Sync,
-        S::Future: Send + 'static,
+        S::Future: Send,
     {
         self.push(buffer::Layer::new(bound))
+    }
+
+    /// Assuming `S` implements `NewService` or `MakeService`, applies the given
+    /// `L`-typed layer on each service produced by `S`.
+    pub fn push_on_response<L: Clone>(self, layer: L) -> Stack<stack::OnResponse<L, S>> {
+        self.push(stack::OnResponseLayer::new(layer))
     }
 
     pub fn push_spawn_ready(self) -> Stack<tower_spawn_ready::MakeSpawnReady<S>> {
@@ -203,10 +216,6 @@ impl<S> Stack<S> {
 
     pub fn push_oneshot(self) -> Stack<oneshot::Oneshot<S>> {
         self.push(oneshot::Layer::new())
-    }
-
-    pub fn push_per_service<L: Clone>(self, layer: L) -> Stack<per_service::PerService<L, S>> {
-        self.push(per_service::layer(layer))
     }
 
     pub fn push_map_response<R: Clone>(

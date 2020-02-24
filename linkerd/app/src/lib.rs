@@ -140,8 +140,8 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                     }))
                     .push(metrics.into_layer::<classify::Response>())
                     .push(control::add_origin::Layer::new())
-                    .push_pending()
-                    .push_per_service(
+                    .into_new_service()
+                    .push_on_response(
                         svc::layers()
                             .push(grpc::req_body_as_payload::layer())
                             // This stack isn't currently Sync; so a Buffer
