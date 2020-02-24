@@ -504,27 +504,6 @@ macro_rules! generate_tests {
                 )
             }
 
-            fn load_both_profiles(_: SocketAddr, _: &client::Client) {
-            //     let foo_client = $make_client(addr, FOO);
-            //     let bar_client = $make_client(addr, BAR);
-            //     // ensure profiles are loaded
-            //     loop {
-            //         println!("get foo");
-            //         assert_eq!(foo_client.get("/load-profile"), "");
-            //         println!("get bar");
-            //         assert_eq!(bar_client.get("/load-profile"), "");
-            //         println!("get metrics");
-            //         let m = metrics.get("/metrics");
-            //         let has_foo = m.contains("rt_load_profile=\"foo\"");
-            //         let has_bar = m.contains("rt_load_profile=\"bar\"");
-            //         println!("load profile; foo={}; bar={};", has_foo, has_bar);
-            //         if  has_foo && has_bar  {
-            //             break;
-            //         }
-            //         ::std::thread::sleep(::std::time::Duration::from_millis(200));
-            //     }
-            }
-
             #[test]
             fn outbound_honors_override_header() {
                 let mut fixture = Fixture::new();
@@ -533,13 +512,11 @@ macro_rules! generate_tests {
                 let client = $make_client(proxy.outbound, FOO);
 
                 // Request 1 --- without override header.
-                println!("foo request");
                 assert_eq!(client.get("/"), "hello from foo");
                 assert_eq!(fixture.foo_reqs(), 1);
                 assert_eq!(fixture.bar_reqs(), 0);
 
                 // Request 2 --- with override header
-                println!("bar request");
                 let res = override_req(&client);
                 assert_eq!(res.status(), http::StatusCode::OK);
                 let stream = res.into_parts().1;
@@ -552,7 +529,6 @@ macro_rules! generate_tests {
                 assert_eq!(fixture.bar_reqs(), 1);
 
                 // Request 3 --- without override header again.
-                println!("foo request");
                 assert_eq!(client.get("/"), "hello from foo");
                 assert_eq!(fixture.foo_reqs(), 2);
                 assert_eq!(fixture.bar_reqs(), 1);
@@ -566,15 +542,12 @@ macro_rules! generate_tests {
                 println!("make client: {}", FOO);
                 let client = $make_client(proxy.outbound, FOO);
                 let metrics = client::http1(proxy.metrics, "localhost");
-                load_both_profiles(proxy.outbound, &metrics);
 
                 // Request 1 --- without override header.
-                println!("normal request");
                 client.get("/");
                 assert_eventually_contains!(metrics.get("/metrics"), "rt_hello=\"foo\"");
 
                 // Request 2 --- with override header
-                println!("override request");
                 let res = override_req(&client);
                 assert_eq!(res.status(), http::StatusCode::OK);
                 assert_eventually_contains!(metrics.get("/metrics"), "rt_hello=\"bar\"");
@@ -621,7 +594,6 @@ macro_rules! generate_tests {
 
                 let client = $make_client(proxy.inbound, FOO);
                 let metrics = client::http1(proxy.metrics, "localhost");
-                load_both_profiles(proxy.inbound, &metrics);
 
                 // Request 1 --- without override header.
                 client.get("/");
