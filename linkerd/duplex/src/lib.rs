@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut};
 use futures::{try_ready, Async, Future, Poll};
 use std::io;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug_span, trace};
+use tracing::trace;
 
 /// A future piping data bi-directionally to In and Out.
 pub struct Duplex<In, Out> {
@@ -58,14 +58,8 @@ where
         // return early if the first half isn't ready, but the other half
         // could make progress.
         trace!("poll");
-        debug_span!("in>out").in_scope(|| self.half_in.copy_into(&mut self.half_out))?;
-        debug_span!("out>in").in_scope(|| {
-            self.half_out.copy_into(&mut self.half_in).map_err(|error| {
-                trace!(%error);
-                error
-            })
-        })?;
-        trace!(half_in.done = %self.half_in.is_done(),half_out.done = %self.half_out.is_done());
+        self.half_in.copy_into(&mut self.half_out)?;
+        self.half_out.copy_into(&mut self.half_in)?;
         if self.half_in.is_done() && self.half_out.is_done() {
             Ok(Async::Ready(()))
         } else {
@@ -96,37 +90,39 @@ where
         // shutdown, we finished in a previous poll, so don't even enter into
         // the copy loop.
         if dst.is_shutdown {
-            trace!("Already shutdown");
+            trace!("already shutdown");
             return Ok(Async::Ready(()));
         }
-        while self.buf.is_some() {
+        loop {
             try_ready!(self.read());
             try_ready!(self.write_into(dst));
+            if self.buf.is_none() {
+                trace!("shutting down");
+                debug_assert!(!dst.is_shutdown, "attempted to shut down destination twice");
+                try_ready!(dst.io.shutdown());
+                dst.is_shutdown = true;
+
+                return Ok(Async::Ready(()));
+            }
         }
-
-        trace!("Shutting down");
-        debug_assert!(!dst.is_shutdown, "attempted to shut down destination twice");
-        try_ready!(dst.io.shutdown());
-        trace!("Shutdown complete");
-        dst.is_shutdown = true;
-
-        return Ok(Async::Ready(()));
     }
 
     fn read(&mut self) -> Poll<(), io::Error> {
+        let mut is_eof = false;
         if let Some(ref mut buf) = self.buf {
             if !buf.has_remaining() {
                 buf.reset();
 
-                trace!("Reading");
+                trace!("reading");
                 let n = try_ready!(self.io.read_buf(buf));
-                if n > 0 {
-                    trace!(bytes=%n);
-                } else {
-                    trace!("End of stream");
-                    self.buf = None;
-                }
+                trace!("read {}B", n);
+
+                is_eof = n == 0;
             }
+        }
+        if is_eof {
+            trace!("eof");
+            self.buf = None;
         }
 
         Ok(Async::Ready(()))
@@ -138,9 +134,9 @@ where
     {
         if let Some(ref mut buf) = self.buf {
             while buf.has_remaining() {
-                trace!("Writing {}B", buf.remaining());
+                trace!("writing {}B", buf.remaining());
                 let n = try_ready!(dst.io.write_buf(buf));
-                trace!("Wrote {}B", n);
+                trace!("wrote {}B", n);
                 if n == 0 {
                     return Err(write_zero());
                 }
