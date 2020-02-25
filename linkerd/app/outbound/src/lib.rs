@@ -172,7 +172,7 @@ impl<A: OrigDstAddr> Config<A> {
                     // request properly.
                     .push(orig_proto_upgrade::layer())
                     .check_service::<Target<HttpEndpoint>>()
-                    .push_trace(|endpoint: &Target<HttpEndpoint>| {
+                    .instrument(|endpoint: &Target<HttpEndpoint>| {
                         info_span!("endpoint", peer.addr = %endpoint.inner.addr)
                     })
             };
@@ -214,7 +214,7 @@ impl<A: OrigDstAddr> Config<A> {
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("balance"))),
                 )
-                .push_trace(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
+                .instrument(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
             let http_balancer_cache = info_span!("balance")
                 .in_scope(|| http_balancer.spawn_cache(cache_capacity, cache_max_idle_age));
 
@@ -228,7 +228,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .into_new_service()
                 .push_on_response(svc::layers().box_http_request().push_lock())
                 .push_on_response(metrics.stack.layer(stack_labels("forward.endpoint")))
-                .push_trace(|endpoint: &Target<HttpEndpoint>| {
+                .instrument(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
                 });
             let http_forward_cache = info_span!("forward")
@@ -297,7 +297,7 @@ impl<A: OrigDstAddr> Config<A> {
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("profile"))),
                 )
-                .push_trace(|_: &Profile| info_span!("profile"));
+                .instrument(|_: &Profile| info_span!("profile"));
 
             let http_logical_profile_cache = info_span!("profile")
                 .in_scope(|| http_profile.spawn_cache(cache_capacity, cache_max_idle_age))
@@ -316,7 +316,7 @@ impl<A: OrigDstAddr> Config<A> {
                         .push_lock()
                         .push(metrics.stack.layer(stack_labels("canonicalize"))),
                 )
-                .push_trace(|name: &dns::Name| info_span!("canonicalize", %name));
+                .instrument(|name: &dns::Name| info_span!("canonicalize", %name));
             let dns_refine_cache = info_span!("canonicalize")
                 .in_scope(|| dns_refine.spawn_cache(cache_capacity, cache_max_idle_age))
                 // Obtains the lock, advances the state of the resolution
@@ -357,7 +357,7 @@ impl<A: OrigDstAddr> Config<A> {
                         .push(http::strip_header::request::layer(DST_OVERRIDE_HEADER)),
                 )
                 .check_service::<Logical<HttpEndpoint>>()
-                .push_trace(|logical: &Logical<_>| info_span!("logical", addr = %logical.addr));
+                .instrument(|logical: &Logical<_>| info_span!("logical", addr = %logical.addr));
 
             let http_admit_request = svc::layers()
                 // Ensures that load is not shed if the inner service is in-use.
@@ -389,7 +389,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_http_insert_target()
                 .push_on_response(http_admit_request)
                 .push_on_response(metrics.stack.layer(stack_labels("source")))
-                .push_trace(
+                .instrument(
                     |src: &tls::accept::Meta| {
                         info_span!("source", target.addr = %src.addrs.target_addr())
                     },

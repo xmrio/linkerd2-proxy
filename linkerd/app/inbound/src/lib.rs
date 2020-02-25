@@ -25,7 +25,7 @@ use linkerd2_app_core::{
     reconnect, router, serve,
     spans::SpanConverter,
     svc::{self, NewService},
-    trace, trace_context,
+    trace_context,
     transport::{self, connect, io::BoxedIo, tls, OrigDstAddr, SysOrigDstAddr},
     Error, ProxyMetrics, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_SERVER_ID,
 };
@@ -121,7 +121,7 @@ impl<A: OrigDstAddr> Config<A> {
                         .push(metrics.stack.layer(stack_labels("endpoint"))),
                 )
                 .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push_trace(|ep: &HttpEndpoint| {
+                .instrument(|ep: &HttpEndpoint| {
                     info_span!(
                         "endpoint",
                         port = %ep.port,
@@ -166,7 +166,7 @@ impl<A: OrigDstAddr> Config<A> {
                 )
                 .check_new_clone_service::<Target>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push_trace(|_: &Target| info_span!("target"))
+                .instrument(|_: &Target| info_span!("target"))
                 .check_service::<Target>();
 
             // Routes targets to a Profile stack, i.e. so that profile
@@ -189,7 +189,7 @@ impl<A: OrigDstAddr> Config<A> {
                 // Caches profile stacks.
                 .check_new_clone_service::<Profile>()
                 .spawn_cache(cache_capacity, cache_max_idle_age)
-                .push_trace(|p: &Profile| info_span!("profile", addr = %p.addr()))
+                .instrument(|p: &Profile| info_span!("profile", addr = %p.addr()))
                 .check_service::<Profile>()
                 .push(router::Layer::new(|()| ProfileTarget))
                 .check_new_service_routes::<(), Target>()
@@ -245,7 +245,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_on_response(strip_header::request::layer(DST_OVERRIDE_HEADER))
                 // Routes each request to a target, obtains a service for that
                 // target, and dispatches the request.
-                .push(trace::Layer::from_target())
+                .instrument_from_target()
                 .push(router::Layer::new(RequestTarget::from))
                 .check_new_service::<tls::accept::Meta>()
                 // Used by tap.
@@ -254,7 +254,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_on_response(http_admit_request)
                 .push_on_response(http_server_observability)
                 .push_on_response(metrics.stack.layer(stack_labels("source")))
-                .push_trace(|src: &tls::accept::Meta| {
+                .instrument(|src: &tls::accept::Meta| {
                     info_span!(
                         "source",
                         target.addr = %src.addrs.target_addr(),

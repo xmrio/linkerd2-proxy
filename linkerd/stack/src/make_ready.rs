@@ -1,12 +1,10 @@
 use futures::{try_ready, Future, Poll};
-
 use linkerd2_error::Error;
 use std::marker::PhantomData;
 use tower::util::Ready;
-use tracing::trace;
 
 #[derive(Debug)]
-pub struct Layer<Req>(PhantomData<fn(Req)>);
+pub struct MakeReadyLayer<Req>(PhantomData<fn(Req)>);
 
 #[derive(Debug)]
 pub struct MakeReady<M, Req>(M, PhantomData<fn(Req)>);
@@ -17,13 +15,13 @@ pub enum MakeReadyFuture<F, S, Req> {
     Ready(Ready<S, Req>),
 }
 
-impl<Req> Layer<Req> {
+impl<Req> MakeReadyLayer<Req> {
     pub fn new() -> Self {
-        Layer(PhantomData)
+        MakeReadyLayer(PhantomData)
     }
 }
 
-impl<M, Req> tower::layer::Layer<M> for Layer<Req> {
+impl<M, Req> tower::layer::Layer<M> for MakeReadyLayer<Req> {
     type Service = MakeReady<M, Req>;
 
     fn layer(&self, inner: M) -> Self::Service {
@@ -31,9 +29,9 @@ impl<M, Req> tower::layer::Layer<M> for Layer<Req> {
     }
 }
 
-impl<Req> Clone for Layer<Req> {
+impl<Req> Clone for MakeReadyLayer<Req> {
     fn clone(&self) -> Self {
-        Layer(self.0)
+        MakeReadyLayer(self.0)
     }
 }
 
@@ -78,22 +76,12 @@ where
             *self = match self {
                 MakeReadyFuture::Making(ref mut fut) => {
                     let svc = try_ready!(fut.poll().map_err(Into::into));
-                    trace!("Made service");
                     MakeReadyFuture::Ready(Ready::new(svc))
                 }
                 MakeReadyFuture::Ready(ref mut fut) => {
-                    trace!("Awaiting readiness");
-                    let ready = fut.poll().map_err(Into::into)?;
-                    trace!(ready = ready.is_ready());
-                    return Ok(ready);
+                    return fut.poll().map_err(Into::into);
                 }
             }
         }
-    }
-}
-
-impl<F, S, Req> Drop for MakeReadyFuture<F, S, Req> {
-    fn drop(&mut self) {
-        trace!("Dropping")
     }
 }

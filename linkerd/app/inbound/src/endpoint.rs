@@ -3,7 +3,7 @@ use linkerd2_app_core::{
     classify, dst, http_request_authority_addr, http_request_host_addr,
     http_request_l5d_override_dst_addr, metric_labels, profiles,
     proxy::{http, identity, tap},
-    router, trace,
+    router, stack_tracing,
     transport::{connect, tls},
     Addr, Conditional, NameAddr, CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER,
 };
@@ -228,7 +228,7 @@ impl fmt::Display for Target {
     }
 }
 
-impl trace::GetSpan<()> for Target {
+impl stack_tracing::GetSpan<()> for Target {
     fn get_span(&self, _: &()) -> tracing::Span {
         use tracing::info_span;
 

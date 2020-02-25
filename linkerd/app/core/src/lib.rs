@@ -23,6 +23,7 @@ pub use linkerd2_request_filter as request_filter;
 pub use linkerd2_router as router;
 pub use linkerd2_service_profiles as profiles;
 pub use linkerd2_stack_metrics as stack_metrics;
+pub use linkerd2_stack_tracing as stack_tracing;
 pub use linkerd2_trace_context as trace_context;
 
 pub mod accept_error;

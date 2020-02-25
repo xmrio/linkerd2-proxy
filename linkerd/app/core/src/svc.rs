@@ -1,14 +1,15 @@
 // Possibly unused, but useful during development.
 
-pub use crate::proxy::{buffer, http, ready};
-use crate::{cache, trace, Error};
+pub use crate::proxy::{buffer, http};
+use crate::{cache, Error};
 use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
 pub use linkerd2_lock as lock;
 pub use linkerd2_stack::{
     self as stack, fallback, layer, map_response, map_target, new_service, on_response, oneshot,
-    pending, NewService,
+    MakeReady, MakeReadyLayer, NewService,
 };
+pub use linkerd2_stack_tracing::{MakeInstrument, MakeInstrumentLayer};
 pub use linkerd2_timeout as timeout;
 use std::time::Duration;
 use tower::layer::util::{Identity, Stack as Pair};
@@ -91,8 +92,8 @@ impl<L> Layers<L> {
         self.push(load_shed::Layer)
     }
 
-    pub fn push_make_ready<Req>(self) -> Layers<Pair<L, ready::Layer<Req>>> {
-        self.push(ready::Layer::new())
+    pub fn push_make_ready<Req>(self) -> Layers<Pair<L, MakeReadyLayer<Req>>> {
+        self.push(MakeReadyLayer::new())
     }
 
     pub fn push_ready_timeout(self, timeout: Duration) -> Layers<Pair<L, timeout::ready::Layer>> {
@@ -129,8 +130,8 @@ impl<L> Layers<L> {
         self.push(oneshot::Layer::new())
     }
 
-    pub fn push_trace<G: Clone>(self, get_span: G) -> Layers<Pair<L, trace::layer::Layer<G>>> {
-        self.push(trace::Layer::new(get_span))
+    pub fn push_instrument<G: Clone>(self, get_span: G) -> Layers<Pair<L, MakeInstrumentLayer<G>>> {
+        self.push(MakeInstrumentLayer::new(get_span))
     }
 }
 
@@ -155,8 +156,12 @@ impl<S> Stack<S> {
         self.push(map_target::MapTargetLayer::new(map_target))
     }
 
-    pub fn push_trace<G: Clone>(self, get_span: G) -> Stack<trace::layer::MakeSpan<G, S>> {
-        self.push(trace::Layer::new(get_span))
+    pub fn instrument<G: Clone>(self, get_span: G) -> Stack<MakeInstrument<G, S>> {
+        self.push(MakeInstrumentLayer::new(get_span))
+    }
+
+    pub fn instrument_from_target(self) -> Stack<MakeInstrument<(), S>> {
+        self.push(MakeInstrumentLayer::from_target())
     }
 
     /// Wraps an inner `MakeService` to be a `NewService`.
@@ -164,8 +169,8 @@ impl<S> Stack<S> {
         self.push(new_service::FromMakeServiceLayer::default())
     }
 
-    pub fn push_make_ready<Req>(self) -> Stack<ready::MakeReady<S, Req>> {
-        self.push(ready::Layer::new())
+    pub fn push_make_ready<Req>(self) -> Stack<MakeReady<S, Req>> {
+        self.push(MakeReadyLayer::new())
     }
 
     pub fn push_lock(self) -> Stack<lock::LockService<S>> {
