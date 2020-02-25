@@ -108,7 +108,7 @@ macro_rules! generate_tests {
             }).run();
 
             let ctrl = controller::new();
-               ctrl.profile_tx_default("disco.test.svc.cluster.local");
+            ctrl.profile_tx_default("disco.test.svc.cluster.local");
             ctrl.destination_tx("disco.test.svc.cluster.local").send(up);
 
             let proxy = proxy::new()
@@ -156,9 +156,9 @@ macro_rules! generate_tests {
             let ctrl = controller::new();
             ctrl.profile_tx_default(NAME);
             ctrl.destination_fail(
-                    NAME,
-                    grpc::Status::new(grpc::Code::InvalidArgument, "unresolvable"),
-                );
+                NAME,
+                grpc::Status::new(grpc::Code::InvalidArgument, "unresolvable"),
+            );
             ctrl.no_more_destinations();
 
             let proxy = proxy::new()
@@ -465,8 +465,7 @@ macro_rules! generate_tests {
                             .label("load_profile", "bar"),
                     ], None, vec![]));
 
-                    ctrl
-                        .destination_tx(FOO).send_addr(foo.addr);
+                    ctrl.destination_tx(FOO).send_addr(foo.addr);
                     ctrl.destination_tx(BAR).send_addr(bar.addr);
 
                     Fixture {
