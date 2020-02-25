@@ -15,7 +15,7 @@ use super::requests::Requests;
 use super::{GetRoutes, OverrideDestination, Route, Routes, WithRoute};
 use futures::{try_ready, Async, Future, Poll, Stream};
 use linkerd2_error::Error;
-use linkerd2_stack::{proxy, NewService};
+use linkerd2_stack::{NewService, ProxyService};
 use rand::{rngs::SmallRng, SeedableRng};
 use tokio::sync::watch;
 use tracing::{debug, trace};
@@ -310,7 +310,7 @@ where
     C: tower::Service<U>,
     Requests<T, R>: Clone,
 {
-    type Response = proxy::Service<Requests<T, R>, C::Response>;
+    type Response = ProxyService<Requests<T, R>, C::Response>;
     type Error = C::Error;
     type Future = ProxyConcrete<Requests<T, R>, C::Future>;
 
@@ -335,12 +335,12 @@ pub struct ProxyConcrete<P, F> {
 }
 
 impl<F: Future, P> Future for ProxyConcrete<P, F> {
-    type Item = proxy::Service<P, F::Item>;
+    type Item = ProxyService<P, F::Item>;
     type Error = F::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let inner = try_ready!(self.future.poll());
-        let service = proxy::Service::new(self.proxy.take().unwrap(), inner);
+        let service = ProxyService::new(self.proxy.take().unwrap(), inner);
         Ok(service.into())
     }
 }

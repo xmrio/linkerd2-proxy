@@ -23,10 +23,9 @@ use linkerd2_app_core::{
     reconnect, retry, router, serve,
     spans::SpanConverter,
     svc::{self, NewService},
-    trace_context,
     transport::{self, connect, tls, OrigDstAddr, SysOrigDstAddr},
-    Conditional, DiscoveryRejected, Error, ProxyMetrics, CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER,
-    L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID, L5D_SERVER_ID,
+    Conditional, DiscoveryRejected, Error, ProxyMetrics, TraceContextLayer, CANONICAL_DST_HEADER,
+    DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID, L5D_SERVER_ID,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -132,7 +131,7 @@ impl<A: OrigDstAddr> Config<A> {
                 let observability = svc::layers()
                     .push(tap_layer.clone())
                     .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                    .push_on_response(trace_context::layer(
+                    .push_on_response(TraceContextLayer::new(
                         span_sink
                             .clone()
                             .map(|sink| SpanConverter::client(sink, trace_labels())),
@@ -374,7 +373,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(metrics.http_errors)
                 .push(errors::layer())
                 // Initiates OpenCensus tracing.
-                .push(trace_context::layer(span_sink.map(|span_sink| {
+                .push(TraceContextLayer::new(span_sink.map(|span_sink| {
                     SpanConverter::server(span_sink, trace_labels())
                 })))
                 // Tracks proxy handletime.

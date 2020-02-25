@@ -9,7 +9,7 @@ pub use linkerd2_stack::{
     self as stack, fallback, layer, map_response, map_target, new_service, on_response, oneshot,
     MakeReady, MakeReadyLayer, NewService,
 };
-pub use linkerd2_stack_tracing::{MakeInstrument, MakeInstrumentLayer};
+pub use linkerd2_stack_tracing::{InstrumentMake, InstrumentMakeLayer};
 pub use linkerd2_timeout as timeout;
 use std::time::Duration;
 use tower::layer::util::{Identity, Stack as Pair};
@@ -130,8 +130,8 @@ impl<L> Layers<L> {
         self.push(oneshot::Layer::new())
     }
 
-    pub fn push_instrument<G: Clone>(self, get_span: G) -> Layers<Pair<L, MakeInstrumentLayer<G>>> {
-        self.push(MakeInstrumentLayer::new(get_span))
+    pub fn push_instrument<G: Clone>(self, get_span: G) -> Layers<Pair<L, InstrumentMakeLayer<G>>> {
+        self.push(InstrumentMakeLayer::new(get_span))
     }
 }
 
@@ -156,12 +156,12 @@ impl<S> Stack<S> {
         self.push(map_target::MapTargetLayer::new(map_target))
     }
 
-    pub fn instrument<G: Clone>(self, get_span: G) -> Stack<MakeInstrument<G, S>> {
-        self.push(MakeInstrumentLayer::new(get_span))
+    pub fn instrument<G: Clone>(self, get_span: G) -> Stack<InstrumentMake<G, S>> {
+        self.push(InstrumentMakeLayer::new(get_span))
     }
 
-    pub fn instrument_from_target(self) -> Stack<MakeInstrument<(), S>> {
-        self.push(MakeInstrumentLayer::from_target())
+    pub fn instrument_from_target(self) -> Stack<InstrumentMake<(), S>> {
+        self.push(InstrumentMakeLayer::from_target())
     }
 
     /// Wraps an inner `MakeService` to be a `NewService`.

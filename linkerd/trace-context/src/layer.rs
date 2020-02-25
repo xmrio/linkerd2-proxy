@@ -4,22 +4,6 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 use tracing::{trace, warn};
 
-pub struct ResponseFuture<F, S> {
-    trace: Option<(Span, S)>,
-    inner: F,
-}
-
-#[derive(Clone, Debug)]
-pub struct Layer<S> {
-    sink: Option<S>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Service<Svc, S> {
-    inner: Svc,
-    sink: Option<S>,
-}
-
 /// A layer that adds distributed tracing instrumentation.
 ///
 /// This layer reads the `traceparent` HTTP header from the request.  If this
@@ -29,17 +13,35 @@ pub struct Service<Svc, S> {
 /// the request.  If the sampled bit of the header was set, we emit metadata
 /// about the span to the given SpanSink when the span is complete, i.e. when
 /// we receive the response.
-pub fn layer<S>(sink: Option<S>) -> Layer<S> {
-    Layer { sink }
+#[derive(Clone, Debug)]
+pub struct TraceContextLayer<S> {
+    sink: Option<S>,
 }
 
-// === impl Layer ===
+#[derive(Clone, Debug)]
+pub struct TraceContext<Svc, S> {
+    inner: Svc,
+    sink: Option<S>,
+}
 
-impl<Svc, S> tower::layer::Layer<Svc> for Layer<S>
+pub struct ResponseFuture<F, S> {
+    trace: Option<(Span, S)>,
+    inner: F,
+}
+
+// === impl TraceContextLayer ===
+
+impl<S> TraceContextLayer<S> {
+    pub fn new(sink: Option<S>) -> Self {
+        Self { sink }
+    }
+}
+
+impl<Svc, S> tower::layer::Layer<Svc> for TraceContextLayer<S>
 where
     S: Clone,
 {
-    type Service = Service<Svc, S>;
+    type Service = TraceContext<Svc, S>;
 
     fn layer(&self, inner: Svc) -> Self::Service {
         Self::Service {
@@ -49,9 +51,9 @@ where
     }
 }
 
-// === impl Service ===
+// === impl TraceContext ===
 
-impl<Svc, B1, B2, S> tower::Service<http::Request<B1>> for Service<Svc, S>
+impl<Svc, B1, B2, S> tower::Service<http::Request<B1>> for TraceContext<Svc, S>
 where
     Svc: tower::Service<http::Request<B1>, Response = http::Response<B2>>,
     S: SpanSink + Clone,

@@ -25,9 +25,9 @@ use linkerd2_app_core::{
     reconnect, router, serve,
     spans::SpanConverter,
     svc::{self, NewService},
-    trace_context,
     transport::{self, connect, io::BoxedIo, tls, OrigDstAddr, SysOrigDstAddr},
-    Error, ProxyMetrics, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_SERVER_ID,
+    Error, ProxyMetrics, TraceContextLayer, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP,
+    L5D_SERVER_ID,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -135,7 +135,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(tap_layer)
                 // Records metrics for each `Target`.
                 .push(metrics.http_endpoint.into_layer::<classify::Response>())
-                .push_on_response(trace_context::layer(
+                .push_on_response(TraceContextLayer::new(
                     span_sink
                         .clone()
                         .map(|span_sink| SpanConverter::client(span_sink, trace_labels())),
@@ -220,7 +220,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(errors::layer());
 
             let http_server_observability = svc::layers()
-                .push(trace_context::layer(span_sink.map(|span_sink| {
+                .push(TraceContextLayer::new(span_sink.map(|span_sink| {
                     SpanConverter::server(span_sink, trace_labels())
                 })))
                 // Tracks proxy handletime.

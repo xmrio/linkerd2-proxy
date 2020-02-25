@@ -1,71 +1,49 @@
-use futures::{future, Async, Future, Poll};
-use linkerd2_error::Error;
+use futures::{Async, Future, Poll};
 use linkerd2_stack::{NewService, Proxy};
 use tracing::{trace, Span};
 use tracing_futures::{Instrument as _, Instrumented};
 
+/// A strategy for creating spans based on a service's target.
 pub trait GetSpan<T> {
     fn get_span(&self, target: &T) -> tracing::Span;
 }
 
-impl<T, F> GetSpan<T> for F
-where
-    F: Fn(&T) -> tracing::Span,
-{
-    fn get_span(&self, target: &T) -> tracing::Span {
-        (self)(target)
-    }
-}
-
-impl<T: GetSpan<()>> GetSpan<T> for () {
-    fn get_span(&self, t: &T) -> tracing::Span {
-        t.get_span(&())
-    }
-}
-
-impl<T> GetSpan<T> for tracing::Span {
-    fn get_span(&self, _: &T) -> tracing::Span {
-        self.clone()
-    }
-}
-
+/// A middleware that instruments tracing for stacks.
 #[derive(Clone, Debug)]
-pub struct MakeInstrumentLayer<G> {
+pub struct InstrumentMakeLayer<G> {
     get_span: G,
 }
 
+/// Instruments a `MakeService` or `NewService` stack.
 #[derive(Clone, Debug)]
-pub struct MakeInstrument<G, M> {
+pub struct InstrumentMake<G, M> {
     get_span: G,
     make: M,
 }
 
+/// Instruments a service produced by `InstrumentMake`.
 #[derive(Clone, Debug)]
 pub struct Instrument<S> {
     span: Span,
     inner: S,
 }
 
-impl<G> MakeInstrumentLayer<G> {
+// === impl InstrumentMakeLayer ===
+
+impl<G> InstrumentMakeLayer<G> {
     pub fn new(get_span: G) -> Self {
         Self { get_span }
     }
 }
 
-impl MakeInstrumentLayer<()> {
+impl InstrumentMakeLayer<()> {
     pub fn from_target() -> Self {
         Self::new(())
     }
 }
 
-impl Default for MakeInstrumentLayer<Span> {
-    fn default() -> Self {
-        Self::new(Span::current())
-    }
-}
-
-impl<G: Clone, M> tower::layer::Layer<M> for MakeInstrumentLayer<G> {
-    type Service = MakeInstrument<G, M>;
+impl<G: Clone, M> tower::layer::Layer<M> for InstrumentMakeLayer<G> {
+    type Service = InstrumentMake<G, M>;
 
     fn layer(&self, make: M) -> Self::Service {
         Self::Service {
@@ -75,7 +53,9 @@ impl<G: Clone, M> tower::layer::Layer<M> for MakeInstrumentLayer<G> {
     }
 }
 
-impl<T, G, N> NewService<T> for MakeInstrument<G, N>
+// === impl InstrumentMake ===
+
+impl<T, G, N> NewService<T> for InstrumentMake<G, N>
 where
     T: std::fmt::Debug,
     G: GetSpan<T>,
@@ -91,31 +71,21 @@ where
     }
 }
 
-impl<T, G, M> tower::Service<T> for MakeInstrument<G, M>
+impl<T, G, M> tower::Service<T> for InstrumentMake<G, M>
 where
     T: std::fmt::Debug,
     G: GetSpan<T>,
     M: tower::Service<T>,
-    M::Error: Into<Error>,
 {
     type Response = Instrument<M::Response>;
-    type Error = Error;
+    type Error = M::Error;
     type Future = Instrument<M::Future>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         trace!("poll_ready");
-        match self.make.poll_ready() {
-            Err(e) => {
-                let error = e.into();
-                trace!(%error);
-                Err(error)
-            }
-            Ok(ready) => {
-                trace!(ready = ready.is_ready());
-
-                Ok(ready)
-            }
-        }
+        let ready = self.make.poll_ready()?;
+        trace!(ready = ready.is_ready());
+        Ok(ready)
     }
 
     fn call(&mut self, target: T) -> Self::Future {
@@ -126,29 +96,25 @@ where
     }
 }
 
+// === impl Instrument ===
+
 impl<F> Future for Instrument<F>
 where
     F: Future,
-    F::Error: Into<Error>,
 {
     type Item = Instrument<F::Item>;
-    type Error = Error;
+    type Error = F::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let _enter = self.span.enter();
 
         trace!("making");
-        match self.inner.poll() {
-            Err(e) => {
-                let error = e.into();
-                trace!(%error);
-                Err(error)
-            }
-            Ok(Async::NotReady) => {
+        match self.inner.poll()? {
+            Async::NotReady => {
                 trace!(ready = false);
                 Ok(Async::NotReady)
             }
-            Ok(Async::Ready(inner)) => {
+            Async::Ready(inner) => {
                 trace!(ready = true);
                 let svc = Instrument {
                     inner,
@@ -182,36 +148,47 @@ impl<Req, S> tower::Service<Req> for Instrument<S>
 where
     Req: std::fmt::Debug,
     S: tower::Service<Req>,
-    S::Error: Into<Error>,
 {
     type Response = S::Response;
-    type Error = Error;
-    type Future = future::MapErr<Instrumented<S::Future>, fn(S::Error) -> Error>;
+    type Error = S::Error;
+    type Future = Instrumented<S::Future>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         let _enter = self.span.enter();
 
         trace!("poll ready");
-        match self.inner.poll_ready() {
-            Err(e) => {
-                let error = e.into();
-                trace!(%error);
-                Err(error)
-            }
-            Ok(ready) => {
-                trace!(ready = ready.is_ready());
-                Ok(ready)
-            }
-        }
+        let ready = self.inner.poll_ready()?;
+        trace!(ready = ready.is_ready());
+        Ok(ready)
     }
 
     fn call(&mut self, request: Req) -> Self::Future {
         let _enter = self.span.enter();
 
         trace!(?request, "call");
-        self.inner
-            .call(request)
-            .instrument(self.span.clone())
-            .map_err(Into::into)
+        self.inner.call(request).instrument(self.span.clone())
+    }
+}
+
+// === impl GetSpan ===
+
+impl<T, F> GetSpan<T> for F
+where
+    F: Fn(&T) -> tracing::Span,
+{
+    fn get_span(&self, target: &T) -> tracing::Span {
+        (self)(target)
+    }
+}
+
+impl<T: GetSpan<()>> GetSpan<T> for () {
+    fn get_span(&self, t: &T) -> tracing::Span {
+        t.get_span(&())
+    }
+}
+
+impl<T> GetSpan<T> for tracing::Span {
+    fn get_span(&self, _: &T) -> tracing::Span {
+        self.clone()
     }
 }

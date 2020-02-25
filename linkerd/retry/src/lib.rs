@@ -2,7 +2,7 @@
 
 use futures::{Future, Poll};
 use linkerd2_error::Error;
-use linkerd2_stack::{proxy, NewService, Proxy};
+use linkerd2_stack::{NewService, Proxy, ProxyService};
 use tower::retry;
 pub use tower::retry::{budget::Budget, Policy};
 use tower::util::{Oneshot, ServiceExt};
@@ -39,7 +39,7 @@ where
     S::Error: Into<Error>,
 {
     Disabled(P::Future),
-    Retry(Oneshot<retry::Retry<R, proxy::Service<P, S>>, Req>),
+    Retry(Oneshot<retry::Retry<R, ProxyService<P, S>>, Req>),
 }
 
 // === impl Layer ===
