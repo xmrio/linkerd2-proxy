@@ -43,7 +43,7 @@ impl Config {
 
                 let addr = control.addr;
                 let svc = svc::stack(connect::Connect::new(control.connect.keepalive))
-                    .push(tls::client::Layer::new(tls::Conditional::Some(
+                    .push(tls::ConnectLayer::new(tls::Conditional::Some(
                         certify.trust_anchors.clone(),
                     )))
                     .push_timeout(control.connect.timeout)

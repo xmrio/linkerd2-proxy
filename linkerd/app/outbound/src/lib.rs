@@ -112,7 +112,7 @@ impl<A: OrigDstAddr> Config<A> {
             // forwarding and HTTP proxying).
             let tcp_connect = svc::stack(connect::Connect::new(connect.keepalive))
                 // Initiates mTLS if the target is configured with identity.
-                .push(tls::client::Layer::new(local_identity))
+                .push(tls::client::ConnectLayer::new(local_identity))
                 // Limits the time we wait for a connection to be established.
                 .push_timeout(connect.timeout)
                 .push(metrics.transport.layer_connect(TransportLabels));

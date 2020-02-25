@@ -70,7 +70,6 @@ impl<T: AsyncRead + AsyncWrite> AsyncRead for Io<T> {
 
 impl<T: AsyncRead + AsyncWrite> AsyncWrite for Io<T> {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
-        tracing::trace!("Shutting down write-side");
         self.sense_err(|io| io.shutdown())
     }
 

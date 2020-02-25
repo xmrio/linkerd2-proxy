@@ -130,7 +130,7 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                 // into a task so consumers can be ignorant. This woudld also
                 // probably enable the use of a lock.
                 let svc = svc::stack(connect::Connect::new(dst.control.connect.keepalive))
-                    .push(tls::client::Layer::new(identity.local()))
+                    .push(tls::ConnectLayer::new(identity.local()))
                     .push_timeout(dst.control.connect.timeout)
                     .push(control::client::layer())
                     .push(control::resolve::layer(dns))

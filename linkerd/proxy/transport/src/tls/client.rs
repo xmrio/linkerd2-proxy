@@ -13,7 +13,7 @@ pub trait HasConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct Layer<L>(super::Conditional<L>);
+pub struct ConnectLayer<L>(super::Conditional<L>);
 
 #[derive(Clone, Debug)]
 pub struct Connect<L, C> {
@@ -32,21 +32,15 @@ pub enum ConnectFuture<L, F: Future> {
     Handshake(tokio_rustls::Connect<F::Item>),
 }
 
-// === impl Layer ===
+// === impl ConnectLayer ===
 
-impl<L> Layer<L>
-where
-    L: HasConfig + Clone,
-{
-    pub fn new(l: super::Conditional<L>) -> Layer<L> {
-        Layer(l)
+impl<L> ConnectLayer<L> {
+    pub fn new(l: super::Conditional<L>) -> ConnectLayer<L> {
+        ConnectLayer(l)
     }
 }
 
-impl<L, C> tower::layer::Layer<C> for Layer<L>
-where
-    L: HasConfig + Clone,
-{
+impl<L: Clone, C> tower::layer::Layer<C> for ConnectLayer<L> {
     type Service = Connect<L, C>;
 
     fn layer(&self, inner: C) -> Self::Service {
