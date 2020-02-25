@@ -3,19 +3,22 @@
 use futures::{Future, Poll};
 use linkerd2_error::Error;
 use linkerd2_stack::{NewService, Proxy, ProxyService};
-use tower::retry;
 pub use tower::retry::{budget::Budget, Policy};
 use tower::util::{Oneshot, ServiceExt};
 use tracing::trace;
 
+/// A strategy for obtaining per-target retry polices.
 pub trait NewPolicy<T> {
     type Policy;
 
     fn new_policy(&self, target: &T) -> Option<Self::Policy>;
 }
 
+/// A layer that applies per-target retry polcies.
+///
+/// Composes `NewService`s that produce a `Proxy`.
 #[derive(Clone, Debug)]
-pub struct Layer<P> {
+pub struct NewRetryLayer<P> {
     new_policy: P,
 }
 
@@ -33,24 +36,24 @@ pub struct Retry<P, S> {
 
 pub enum ResponseFuture<R, P, S, Req>
 where
-    R: retry::Policy<Req, P::Response, Error> + Clone,
+    R: tower::retry::Policy<Req, P::Response, Error> + Clone,
     P: Proxy<Req, S> + Clone,
     S: tower::Service<P::Request> + Clone,
     S::Error: Into<Error>,
 {
     Disabled(P::Future),
-    Retry(Oneshot<retry::Retry<R, ProxyService<P, S>>, Req>),
+    Retry(Oneshot<tower::retry::Retry<R, ProxyService<P, S>>, Req>),
 }
 
-// === impl Layer ===
+// === impl NewRetryLayer ===
 
-impl<P> Layer<P> {
+impl<P> NewRetryLayer<P> {
     pub fn new(new_policy: P) -> Self {
         Self { new_policy }
     }
 }
 
-impl<P: Clone, N> tower::layer::Layer<N> for Layer<P> {
+impl<P: Clone, N> tower::layer::Layer<N> for NewRetryLayer<P> {
     type Service = NewRetry<P, N>;
 
     fn layer(&self, inner: N) -> Self::Service {
@@ -61,7 +64,7 @@ impl<P: Clone, N> tower::layer::Layer<N> for Layer<P> {
     }
 }
 
-// === impl Stack ===
+// === impl NewRetry ===
 
 impl<T, N, P> NewService<T> for NewRetry<P, N>
 where
@@ -71,7 +74,9 @@ where
     type Service = Retry<P::Policy, N::Service>;
 
     fn new_service(&self, target: T) -> Self::Service {
+        // Determine if there is a retry policy for the given target.
         let policy = self.new_policy.new_policy(&target);
+
         let inner = self.inner.new_service(target);
         Retry { policy, inner }
     }
@@ -81,7 +86,7 @@ where
 
 impl<R, P, Req, S> Proxy<Req, S> for Retry<R, P>
 where
-    R: retry::Policy<Req, P::Response, Error> + Clone,
+    R: tower::retry::Policy<Req, P::Response, Error> + Clone,
     P: Proxy<Req, S> + Clone,
     S: tower::Service<P::Request> + Clone,
     S::Error: Into<Error>,
@@ -93,8 +98,10 @@ where
 
     fn proxy(&self, svc: &mut S, req: Req) -> Self::Future {
         trace!(retryable = %self.policy.is_some());
-        if let Some(policy) = self.policy.clone() {
-            let retry = retry::Retry::new(policy, self.inner.clone().into_service(svc.clone()));
+
+        if let Some(policy) = self.policy.as_ref() {
+            let inner = self.inner.clone().into_service(svc.clone());
+            let retry = tower::retry::Retry::new(policy.clone(), inner);
             return ResponseFuture::Retry(retry.oneshot(req));
         }
 
@@ -104,7 +111,7 @@ where
 
 impl<R, P, S, Req> Future for ResponseFuture<R, P, S, Req>
 where
-    R: retry::Policy<Req, P::Response, Error> + Clone,
+    R: tower::retry::Policy<Req, P::Response, Error> + Clone,
     P: Proxy<Req, S> + Clone,
     S: tower::Service<P::Request> + Clone,
     S::Error: Into<Error>,
