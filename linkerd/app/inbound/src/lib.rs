@@ -25,7 +25,7 @@ use linkerd2_app_core::{
     reconnect, router, serve,
     spans::SpanConverter,
     svc::{self, NewService},
-    transport::{self, connect, io::BoxedIo, tls, OrigDstAddr, SysOrigDstAddr},
+    transport::{self, io::BoxedIo, tls, OrigDstAddr, SysOrigDstAddr},
     Error, ProxyMetrics, TraceContextLayer, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP,
     L5D_SERVER_ID,
 };
@@ -94,7 +94,7 @@ impl<A: OrigDstAddr> Config<A> {
         let serve = Box::new(future::lazy(move || {
             // Establishes connections to the local application (for both
             // TCP forwarding and HTTP proxying).
-            let tcp_connect = svc::stack(connect::Connect::new(connect.keepalive))
+            let tcp_connect = svc::connect(connect.keepalive)
                 .push_map_response(BoxedIo::new) // Ensures the transport propagates shutdown properly.
                 .push_timeout(connect.timeout)
                 .push(metrics.transport.layer_connect(TransportLabels));
@@ -143,10 +143,7 @@ impl<A: OrigDstAddr> Config<A> {
 
             let http_profile_route_proxy = svc::proxies()
                 // Sets the route as a request extension so that it can be used
-                // by tap.
-                .push_http_insert_target()
-                // Records per-route metrics.
-                .push(metrics.http_route.into_layer::<classify::Response>())
+                // by tap}
                 // Sets the per-route response classifier as a request
                 // extension.
                 .push(classify::Layer::new())

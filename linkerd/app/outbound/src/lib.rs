@@ -23,7 +23,7 @@ use linkerd2_app_core::{
     reconnect, retry, router, serve,
     spans::SpanConverter,
     svc::{self, NewService},
-    transport::{self, connect, tls, OrigDstAddr, SysOrigDstAddr},
+    transport::{self, tls, OrigDstAddr, SysOrigDstAddr},
     Conditional, DiscoveryRejected, Error, ProxyMetrics, TraceContextLayer, CANONICAL_DST_HEADER,
     DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID, L5D_SERVER_ID,
 };
@@ -110,7 +110,7 @@ impl<A: OrigDstAddr> Config<A> {
         let serve = Box::new(future::lazy(move || {
             // Establishes connections to remote peers (for both TCP
             // forwarding and HTTP proxying).
-            let tcp_connect = svc::stack(connect::Connect::new(connect.keepalive))
+            let tcp_connect = svc::connect(connect.keepalive)
                 // Initiates mTLS if the target is configured with identity.
                 .push(tls::client::ConnectLayer::new(local_identity))
                 // Limits the time we wait for a connection to be established.

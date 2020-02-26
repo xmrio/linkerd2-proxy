@@ -1,6 +1,7 @@
 // Possibly unused, but useful during development.
 
 pub use crate::proxy::{buffer, http};
+use crate::transport::Connect;
 use crate::{cache, Error};
 use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
@@ -30,6 +31,10 @@ pub fn layers() -> Layers<Identity> {
 
 pub fn stack<S>(inner: S) -> Stack<S> {
     Stack(inner)
+}
+
+pub fn connect(keepalive: Option<Duration>) -> Stack<Connect> {
+    Stack(Connect::new(keepalive))
 }
 
 pub fn proxies() -> Stack<IdentityProxy> {
