@@ -22,4 +22,3 @@ tokio-timer = "0.2"   # for tokio_timer::clock
 tower = "0.1"
 tower-util = "0.1"
 tracing = "0.1.9"
-tracing-futures = "0.1"

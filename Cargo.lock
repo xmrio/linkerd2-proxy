@@ -847,7 +847,6 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "indexmap",
- "linkerd2-error",
  "linkerd2-metrics",
  "tower",
 ]
@@ -914,7 +913,6 @@ dependencies = [
  "tower",
  "tower-util",
  "tracing",
- "tracing-futures",
 ]
 
 [[package]]
@@ -1075,15 +1073,12 @@ dependencies = [
  "hyper-balance",
  "indexmap",
  "linkerd2-addr",
- "linkerd2-cache",
  "linkerd2-dns",
  "linkerd2-drain",
  "linkerd2-duplex",
  "linkerd2-error",
  "linkerd2-http-box",
  "linkerd2-identity",
- "linkerd2-metrics",
- "linkerd2-proxy-transport",
  "linkerd2-stack",
  "linkerd2-timeout",
  "rand 0.7.2",
@@ -1167,7 +1162,6 @@ dependencies = [
  "linkerd2-error",
  "tokio",
  "tower",
- "tower-load",
  "tracing",
 ]
 
@@ -1235,15 +1229,10 @@ name = "linkerd2-router"
 version = "0.1.0"
 dependencies = [
  "futures",
- "indexmap",
  "linkerd2-error",
  "linkerd2-stack",
- "tokio",
- "tokio-sync",
- "tokio-timer",
  "tower",
  "tracing",
- "tracing-futures",
 ]
 
 [[package]]
@@ -1258,7 +1247,6 @@ dependencies = [
  "linkerd2-dns",
  "linkerd2-error",
  "linkerd2-proxy-api",
- "linkerd2-retry",
  "linkerd2-stack",
  "linkerd2-test-util",
  "prost-types",
@@ -1297,9 +1285,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "indexmap",
- "linkerd2-error",
  "linkerd2-metrics",
- "linkerd2-stack",
  "tokio",
  "tokio-timer",
  "tower",
@@ -1350,7 +1336,6 @@ dependencies = [
  "hex",
  "http",
  "linkerd2-error",
- "linkerd2-stack",
  "rand 0.7.2",
  "tower",
  "tracing",
