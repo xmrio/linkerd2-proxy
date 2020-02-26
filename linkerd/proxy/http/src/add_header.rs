@@ -90,14 +90,6 @@ where
     fn call(&mut self, t: T) -> Self::Future {
         let header = if let Some(value) = (self.get_header)(&t) {
             Some((self.header.clone(), value))
-        /*
-        tower::util::Either::A(Service {
-            header: self.header.clone(),
-            value,
-            inner,
-            _req_or_res: PhantomData,
-        }));
-        */
         } else {
             trace!("{:?} not enabled for {:?}", self.header, t);
             None
