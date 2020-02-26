@@ -96,7 +96,7 @@ impl<A: OrigDstAddr> Config<A> {
                     cache_capacity,
                     cache_max_idle_age,
                     disable_protocol_detection_for_ports,
-                    service_acquisition_timeout,
+                    dispatch_timeout,
                     max_in_flight_requests,
                 },
         } = self;
@@ -382,7 +382,7 @@ impl<A: OrigDstAddr> Config<A> {
             let http_server = http_logical_router
                 .check_service::<Logical<HttpEndpoint>>()
                 .push_make_ready()
-                .push_timeout(service_acquisition_timeout)
+                .push_timeout(dispatch_timeout)
                 .push(router::Layer::new(LogicalPerRequest::from))
                 // Used by tap.
                 .push_http_insert_target()

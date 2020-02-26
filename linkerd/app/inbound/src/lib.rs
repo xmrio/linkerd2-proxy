@@ -80,7 +80,7 @@ impl<A: OrigDstAddr> Config<A> {
                     cache_capacity,
                     cache_max_idle_age,
                     disable_protocol_detection_for_ports,
-                    service_acquisition_timeout,
+                    dispatch_timeout,
                     max_in_flight_requests,
                 },
         } = self;
@@ -236,7 +236,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push_make_ready()
                 // Limits the amount of time each request waits to obtain a
                 // ready service.
-                .push_timeout(service_acquisition_timeout)
+                .push_timeout(dispatch_timeout)
                 // Removes the override header after it has been used to
                 // determine a reuquest target.
                 .push_on_response(strip_header::request::layer(DST_OVERRIDE_HEADER))

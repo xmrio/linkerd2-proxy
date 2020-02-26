@@ -27,7 +27,7 @@ pub struct ProxyConfig<A: OrigDstAddr = SysOrigDstAddr> {
     pub cache_capacity: usize,
     pub cache_max_idle_age: Duration,
     pub disable_protocol_detection_for_ports: Arc<IndexSet<u16>>,
-    pub service_acquisition_timeout: Duration,
+    pub dispatch_timeout: Duration,
     pub max_in_flight_requests: usize,
 }
 
@@ -60,7 +60,7 @@ impl<A: OrigDstAddr> ProxyConfig<A> {
             cache_max_idle_age: self.cache_max_idle_age,
             disable_protocol_detection_for_ports: self.disable_protocol_detection_for_ports,
             max_in_flight_requests: self.max_in_flight_requests,
-            service_acquisition_timeout: self.service_acquisition_timeout,
+            dispatch_timeout: self.dispatch_timeout,
         }
     }
 }
