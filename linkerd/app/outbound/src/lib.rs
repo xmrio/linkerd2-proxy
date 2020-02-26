@@ -41,6 +41,8 @@ mod endpoint;
 mod orig_proto_upgrade;
 mod require_identity_on_endpoint;
 
+use self::require_identity_on_endpoint::MakeRequireIdentityLayer;
+
 const EWMA_DEFAULT_RTT: Duration = Duration::from_millis(30);
 const EWMA_DECAY: Duration = Duration::from_secs(10);
 

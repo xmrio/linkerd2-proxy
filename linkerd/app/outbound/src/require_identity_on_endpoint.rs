@@ -12,11 +12,11 @@ use linkerd2_app_core::{
 };
 use tracing::debug;
 
-#[derive(Clone, Debug)]
-pub struct Layer(());
+#[derive(Clone, Debug, Default)]
+pub struct MakeRequireIdentityLayer(());
 
 #[derive(Clone, Debug)]
-pub struct MakeSvc<M> {
+pub struct MakeRequireIdentity<M> {
     inner: M,
 }
 
@@ -31,29 +31,31 @@ pub struct RequireIdentity<M> {
     inner: M,
 }
 
-// ===== impl Layer =====
+// === impl MakeRequireIdentityLayer ===
 
-pub fn layer() -> Layer {
-    Layer(())
-}
-
-impl<M> svc::Layer<M> for Layer {
-    type Service = MakeSvc<M>;
-
-    fn layer(&self, inner: M) -> Self::Service {
-        MakeSvc { inner }
+impl MakeRequireIdentityLayer {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-// ===== impl MakeSvc =====
+impl<M> svc::Layer<M> for MakeRequireIdentityLayer {
+    type Service = MakeRequireIdentity<M>;
 
-impl<M> svc::NewService<HttpEndpoint> for MakeSvc<M>
+    fn layer(&self, inner: M) -> Self::Service {
+        MakeRequireIdentity { inner }
+    }
+}
+
+// === impl MakeRequireIdentity ===
+
+impl<M> svc::NewService<Endpoint> for MakeRequireIdentity<M>
 where
-    M: svc::NewService<HttpEndpoint>,
+    M: svc::NewService<Endpoint>,
 {
     type Service = RequireIdentity<M::Service>;
 
-    fn new_service(&self, target: HttpEndpoint) -> Self::Service {
+    fn new_service(&self, target: Endpoint) -> Self::Service {
         let peer_identity = target.peer_identity().clone();
         let inner = self.inner.new_service(target);
         RequireIdentity {
@@ -63,7 +65,7 @@ where
     }
 }
 
-impl<T, M> svc::Service<T> for MakeSvc<M>
+impl<T, M> svc::Service<T> for MakeRequireIdentity<M>
 where
     T: tls::HasPeerIdentity,
     M: svc::Service<T>,
@@ -117,7 +119,7 @@ where
     }
 }
 
-// ===== impl RequireIdentity =====
+// === impl RequireIdentity ===
 
 impl<M, A> svc::Service<http::Request<A>> for RequireIdentity<M>
 where
