@@ -49,13 +49,13 @@ impl<M> svc::Layer<M> for MakeRequireIdentityLayer {
 
 // === impl MakeRequireIdentity ===
 
-impl<M> svc::NewService<Endpoint> for MakeRequireIdentity<M>
+impl<M> svc::NewService<HttpEndpoint> for MakeRequireIdentity<M>
 where
-    M: svc::NewService<Endpoint>,
+    M: svc::NewService<HttpEndpoint>,
 {
     type Service = RequireIdentity<M::Service>;
 
-    fn new_service(&self, target: Endpoint) -> Self::Service {
+    fn new_service(&self, target: HttpEndpoint) -> Self::Service {
         let peer_identity = target.peer_identity().clone();
         let inner = self.inner.new_service(target);
         RequireIdentity {

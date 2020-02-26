@@ -148,7 +148,7 @@ impl<A: OrigDstAddr> Config<A> {
                             .push(http::strip_header::response::layer(L5D_SERVER_ID))
                             .push(http::strip_header::request::layer(L5D_REQUIRE_ID)),
                     )
-                    .push(require_identity_on_endpoint::layer());
+                    .push(MakeRequireIdentityLayer::new());
 
                 tcp_connect
                     .clone()

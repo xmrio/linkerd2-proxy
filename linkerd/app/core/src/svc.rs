@@ -227,10 +227,7 @@ impl<S> Stack<S> {
         self.push(stack::OneshotLayer::new())
     }
 
-    pub fn push_map_response<R: Clone>(
-        self,
-        map_response: R,
-    ) -> Stack<stack::MapResponse<S, R>> {
+    pub fn push_map_response<R: Clone>(self, map_response: R) -> Stack<stack::MapResponse<S, R>> {
         self.push(stack::MapResponseLayer::new(map_response))
     }
 
