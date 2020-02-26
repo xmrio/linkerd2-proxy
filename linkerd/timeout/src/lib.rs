@@ -1,6 +1,7 @@
 #![deny(warnings, rust_2018_idioms)]
 
 use futures::{Future, Poll};
+use linkerd2_error::Error;
 use linkerd2_stack::Proxy;
 use std::time::Duration;
 use tokio_connect::Connect;
@@ -8,8 +9,6 @@ use tokio_timer as timer;
 
 pub mod error;
 pub mod ready;
-
-use self::error::{Error, Timedout};
 
 /// A timeout that wraps an underlying operation.
 #[derive(Debug, Clone)]
@@ -121,7 +120,7 @@ where
                 }
 
                 if error.is_elapsed() {
-                    return Timedout(*duration).into();
+                    return error::ResponseTimeout(*duration).into();
                 }
 
                 error

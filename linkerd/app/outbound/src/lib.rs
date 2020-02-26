@@ -257,7 +257,7 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(retry::layer(metrics.http_route_retry))
                 .check_new_clone_service::<dst::Route>()
                 // Sets an optional request timeout.
-                .push(http::timeout::layer())
+                .push(http::MakeTimeoutLayer::default())
                 .check_new_clone_service::<dst::Route>()
                 // Records per-route metrics.
                 .push(metrics.http_route.into_layer::<classify::Response>())

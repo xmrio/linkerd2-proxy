@@ -100,7 +100,7 @@ where
         trace!(retryable = %self.policy.is_some());
 
         if let Some(policy) = self.policy.as_ref() {
-            let inner = self.inner.clone().into_service(svc.clone());
+            let inner = self.inner.clone().wrap_service(svc.clone());
             let retry = tower::retry::Retry::new(policy.clone(), inner);
             return ResponseFuture::Retry(retry.oneshot(req));
         }

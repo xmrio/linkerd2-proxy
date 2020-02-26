@@ -1,3 +1,4 @@
+use crate::proxy::http::timeout::error as timeout;
 use crate::proxy::identity;
 use http::{header::HeaderValue, StatusCode};
 use linkerd2_cache::error as cache;
@@ -30,6 +31,7 @@ pub type Label = (super::metric_labels::Direction, Reason);
 pub enum Reason {
     CacheFull,
     DispatchTimeout,
+    ResponseTimeout,
     IdentityRequired,
     LoadShed,
     Unexpected,
@@ -110,7 +112,9 @@ impl<B: Default> respond::Respond for Respond<B> {
 }
 
 fn http_status(error: &Error) -> StatusCode {
-    if error.is::<cache::NoCapacity>() {
+    if error.is::<timeout::ResponseTimeout>() {
+        http::StatusCode::GATEWAY_TIMEOUT
+    } else if error.is::<cache::NoCapacity>() {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<shed::Overloaded>() {
         http::StatusCode::SERVICE_UNAVAILABLE
@@ -125,40 +129,55 @@ fn http_status(error: &Error) -> StatusCode {
     }
 }
 
-fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) {
+fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) -> grpc::Code {
     const GRPC_STATUS: &'static str = "grpc-status";
     const GRPC_MESSAGE: &'static str = "grpc-message";
 
-    if error.is::<cache::NoCapacity>() {
-        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
+    if error.is::<timeout::ResponseTimeout>() {
+        let code = Code::DeadlineExceeded;
+        headers.insert(GRPC_STATUS, code_header(code));
+        headers.insert(GRPC_MESSAGE, HeaderValue::from_static("request timed out"));
+        code
+    } else if error.is::<cache::NoCapacity>() {
+        let code = Code::Unavailable;
+        headers.insert(GRPC_STATUS, code_header(code));
         headers.insert(
             GRPC_MESSAGE,
             HeaderValue::from_static("proxy router cache exhausted"),
         );
+        code
     } else if error.is::<shed::Overloaded>() {
-        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
+        let code = Code::Unavailable;
+        headers.insert(GRPC_STATUS, code_header(code));
         headers.insert(
             GRPC_MESSAGE,
             HeaderValue::from_static("proxy max-concurrency exhausted"),
         );
+        code
     } else if error.is::<tower::timeout::error::Elapsed>() {
-        headers.insert(GRPC_STATUS, code_header(Code::Unavailable));
+        let code = Code::Unavailable;
+        headers.insert(GRPC_STATUS, code_header(code));
         headers.insert(
             GRPC_MESSAGE,
             HeaderValue::from_static("proxy dispatch timed out"),
         );
+        code
     } else if error.is::<IdentityRequired>() {
-        headers.insert(GRPC_STATUS, code_header(Code::FailedPrecondition));
+        let code = Code::FailedPrecondition;
+        headers.insert(GRPC_STATUS, code_header(code));
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {
             headers.insert(GRPC_MESSAGE, msg);
         }
+        code
     } else if let Some(e) = error.downcast_ref::<lock::error::ServiceError>() {
         set_grpc_status(e.inner(), headers)
     } else {
-        headers.insert(GRPC_STATUS, code_header(Code::Internal));
+        let code = Code::Internal;
+        headers.insert(GRPC_STATUS, code_header(code));
         if let Ok(msg) = HeaderValue::from_str(&error.to_string()) {
             headers.insert(GRPC_MESSAGE, msg);
         }
+        code
     }
 }
 
@@ -215,7 +234,9 @@ impl metrics::LabelError<Error> for LabelError {
     type Labels = Label;
 
     fn label_error(&self, err: &Error) -> Self::Labels {
-        let reason = if err.is::<cache::NoCapacity>() {
+        let reason = if err.is::<timeout::ResponseTimeout>() {
+            Reason::ResponseTimeout
+        } else if err.is::<cache::NoCapacity>() {
             Reason::CacheFull
         } else if err.is::<shed::Overloaded>() {
             Reason::LoadShed
@@ -240,6 +261,7 @@ impl metrics::FmtLabels for Reason {
                 Reason::CacheFull => "cache full",
                 Reason::LoadShed => "load shed",
                 Reason::DispatchTimeout => "dispatch timeout",
+                Reason::ResponseTimeout => "response timeout",
                 Reason::IdentityRequired => "identity required",
                 Reason::Unexpected => "unexpected",
             }

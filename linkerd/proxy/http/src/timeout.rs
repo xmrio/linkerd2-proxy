@@ -1,9 +1,8 @@
 use futures::{try_ready, Future, Poll};
-use linkerd2_error::Error;
-use linkerd2_stack::{NewService, Proxy};
-use linkerd2_timeout::{error, Timeout as Inner, TimeoutFuture};
+use linkerd2_stack::NewService;
+pub use linkerd2_timeout::error;
+use linkerd2_timeout::Timeout;
 use std::time::Duration;
-use tracing::{debug, error};
 
 /// Implement on targets to determine if a service has a timeout.
 pub trait HasTimeout {
@@ -17,12 +16,8 @@ pub trait HasTimeout {
 ///
 /// Timeout errors are translated into `http::Response`s with appropiate
 /// status codes.
-pub fn layer() -> Layer {
-    Layer
-}
-
-#[derive(Clone, Debug)]
-pub struct Layer;
+#[derive(Clone, Debug, Default)]
+pub struct MakeTimeoutLayer(());
 
 #[derive(Clone, Debug)]
 pub struct MakeTimeout<M> {
@@ -34,15 +29,7 @@ pub struct MakeFuture<F> {
     timeout: Option<Duration>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Timeout<T>(Inner<T>);
-
-/// A marker set in `http::Response::extensions` that *this* process triggered
-/// the request timeout.
-#[derive(Debug)]
-pub struct ProxyTimedOut(());
-
-impl<M> tower::layer::Layer<M> for Layer {
+impl<M> tower::layer::Layer<M> for MakeTimeoutLayer {
     type Service = MakeTimeout<M>;
 
     fn layer(&self, inner: M) -> Self::Service {
@@ -59,8 +46,8 @@ where
 
     fn new_service(&self, target: T) -> Self::Service {
         match target.timeout() {
-            Some(t) => Timeout(Inner::new(self.inner.new_service(target), t)),
-            None => Timeout(Inner::passthru(self.inner.new_service(target))),
+            Some(t) => Timeout::new(self.inner.new_service(target), t),
+            None => Timeout::passthru(self.inner.new_service(target)),
         }
     }
 }
@@ -94,78 +81,10 @@ impl<F: Future> Future for MakeFuture<F> {
         let inner = try_ready!(self.inner.poll());
 
         let svc = match self.timeout {
-            Some(t) => Timeout(Inner::new(inner, t)),
-            None => Timeout(Inner::passthru(inner)),
+            Some(t) => Timeout::new(inner, t),
+            None => Timeout::passthru(inner),
         };
 
         Ok(svc.into())
-    }
-}
-
-impl<P, S, A, B> Proxy<http::Request<A>, S> for Timeout<P>
-where
-    P: Proxy<http::Request<A>, S, Response = http::Response<B>>,
-    S: tower::Service<P::Request>,
-    B: Default,
-{
-    type Request = P::Request;
-    type Response = P::Response;
-    type Error = Error;
-    type Future = ResponseFuture<P::Future, B>;
-
-    fn proxy(&self, svc: &mut S, req: http::Request<A>) -> Self::Future {
-        ResponseFuture(self.0.proxy(svc, req), std::marker::PhantomData)
-    }
-}
-
-impl<S, A, B> tower::Service<http::Request<A>> for Timeout<S>
-where
-    S: tower::Service<http::Request<A>, Response = http::Response<B>>,
-    S::Error: Into<Error>,
-    B: Default,
-{
-    type Response = S::Response;
-    type Error = Error;
-    type Future = ResponseFuture<S::Future, B>;
-
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        self.0.poll_ready()
-    }
-
-    fn call(&mut self, req: http::Request<A>) -> Self::Future {
-        ResponseFuture(self.0.call(req), std::marker::PhantomData)
-    }
-}
-
-pub struct ResponseFuture<F, B>(TimeoutFuture<F>, std::marker::PhantomData<fn() -> B>);
-
-impl<F, B> Future for ResponseFuture<F, B>
-where
-    B: Default,
-    F: Future<Item = http::Response<B>>,
-    F::Error: Into<Error>,
-{
-    type Item = http::Response<B>;
-    type Error = Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll().or_else(|err| {
-            if let Some(err) = err.downcast_ref::<error::Timedout>() {
-                debug!("request timed out after {:?}", err.duration());
-                let mut res = http::Response::default();
-                *res.status_mut() = http::StatusCode::GATEWAY_TIMEOUT;
-                res.extensions_mut().insert(ProxyTimedOut(()));
-                return Ok(res.into());
-            } else if let Some(err) = err.downcast_ref::<error::Timer>() {
-                // These are unexpected, and mean the runtime is in a bad place.
-                error!("unexpected runtime timer error: {}", err);
-                let mut res = http::Response::default();
-                *res.status_mut() = http::StatusCode::BAD_GATEWAY;
-                return Ok(res.into());
-            }
-
-            // else
-            Err(err)
-        })
     }
 }

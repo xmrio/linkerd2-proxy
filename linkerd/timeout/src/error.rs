@@ -3,42 +3,22 @@
 use std::fmt;
 use std::time::Duration;
 
-pub use tokio_timer::Error as Timer;
-
-pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
+/// An error representing that an operation timed out.
+#[derive(Debug)]
+pub struct ReadyTimeout(pub(crate) Duration);
 
 /// An error representing that an operation timed out.
 #[derive(Debug)]
-pub struct Timedout(pub(crate) Duration);
-
-/// An error indicating a service failed to become ready.
-#[derive(Debug)]
-pub struct ReadyTimeout(pub(crate) Duration);
+pub struct ResponseTimeout(pub(crate) Duration);
 
 /// A duration which pretty-prints as fractional seconds.
 #[derive(Copy, Clone, Debug)]
 struct HumanDuration<'a>(&'a Duration);
 
-// === impl Timedout ===
-
-impl Timedout {
-    /// Get the amount of time waited until this error was triggered.
-    pub fn duration(&self) -> Duration {
-        self.0
-    }
-}
-
-impl fmt::Display for Timedout {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "operation timed out after {}", HumanDuration(&self.0))
-    }
-}
-
-impl std::error::Error for Timedout {}
-
-// === ReadyTimeout ===
+// === impl ResponseTimeout ===
 
 impl ReadyTimeout {
+    /// Get the amount of time waited until this error was triggered.
     pub fn duration(&self) -> Duration {
         self.0
     }
@@ -56,7 +36,24 @@ impl fmt::Display for ReadyTimeout {
 
 impl std::error::Error for ReadyTimeout {}
 
-// === HumanDuraiton ===
+// === impl ResponseTimeout ===
+
+impl ResponseTimeout {
+    /// Get the amount of time waited until this error was triggered.
+    pub fn duration(&self) -> Duration {
+        self.0
+    }
+}
+
+impl fmt::Display for ResponseTimeout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "response timed out after {}", HumanDuration(&self.0))
+    }
+}
+
+impl std::error::Error for ResponseTimeout {}
+
+// === HumanDuration ===
 
 impl<'a> fmt::Display for HumanDuration<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
