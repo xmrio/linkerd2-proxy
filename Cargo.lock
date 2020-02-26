@@ -1204,7 +1204,6 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "linkerd2-error",
- "linkerd2-stack",
  "tower",
  "tracing",
 ]
