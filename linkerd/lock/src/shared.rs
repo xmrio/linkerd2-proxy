@@ -12,7 +12,10 @@ use tracing::trace;
 /// dropped. In high-load scenarios where the lock _always_ has new waiters, this could potentially
 /// manifest as unbounded memory growth. This situation is not expected to arise in normal operation.
 pub(crate) struct Shared<T> {
+    /// Set when the value is available to be acquired; None when the value is acquired.
     value: Option<T>,
+
+    /// A LIFO stack of waiters to be notified when the value is available.
     waiters: Vec<Notify>,
 }
 
