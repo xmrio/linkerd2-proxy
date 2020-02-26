@@ -6,10 +6,7 @@ use crate::{cache, Error};
 use linkerd2_box as boxed;
 use linkerd2_concurrency_limit as concurrency_limit;
 pub use linkerd2_lock as lock;
-pub use linkerd2_stack::{
-    self as stack, fallback, layer, map_response, map_target, new_service, on_response, oneshot,
-    MakeReady, MakeReadyLayer, NewService,
-};
+pub use linkerd2_stack::{self as stack, layer, NewService};
 pub use linkerd2_stack_tracing::{InstrumentMake, InstrumentMakeLayer};
 pub use linkerd2_timeout as timeout;
 use std::time::Duration;
@@ -60,13 +57,15 @@ impl<L> Layers<L> {
     pub fn push_map_target<M: Clone>(
         self,
         map_target: M,
-    ) -> Layers<Pair<L, map_target::MapTargetLayer<M>>> {
-        self.push(map_target::MapTargetLayer::new(map_target))
+    ) -> Layers<Pair<L, stack::MapTargetLayer<M>>> {
+        self.push(stack::MapTargetLayer::new(map_target))
     }
 
     /// Wraps an inner `MakeService` to be a `NewService`.
-    pub fn push_into_new_service(self) -> Layers<Pair<L, new_service::FromMakeServiceLayer>> {
-        self.push(new_service::FromMakeServiceLayer::default())
+    pub fn push_into_new_service(
+        self,
+    ) -> Layers<Pair<L, stack::new_service::FromMakeServiceLayer>> {
+        self.push(stack::new_service::FromMakeServiceLayer::default())
     }
 
     /// Buffers requests in an mpsc, spawning the inner service onto a dedicated task.
@@ -97,8 +96,8 @@ impl<L> Layers<L> {
         self.push(load_shed::Layer)
     }
 
-    pub fn push_make_ready<Req>(self) -> Layers<Pair<L, MakeReadyLayer<Req>>> {
-        self.push(MakeReadyLayer::new())
+    pub fn push_make_ready<Req>(self) -> Layers<Pair<L, stack::MakeReadyLayer<Req>>> {
+        self.push(stack::MakeReadyLayer::new())
     }
 
     pub fn push_ready_timeout(self, timeout: Duration) -> Layers<Pair<L, timeout::ready::Layer>> {
@@ -108,8 +107,8 @@ impl<L> Layers<L> {
     pub fn push_map_response<R: Clone>(
         self,
         map_response: R,
-    ) -> Layers<Pair<L, map_response::Layer<R>>> {
-        self.push(map_response::Layer::new(map_response))
+    ) -> Layers<Pair<L, stack::MapResponseLayer<R>>> {
+        self.push(stack::MapResponseLayer::new(map_response))
     }
 
     pub fn boxed<A, B>(self) -> Layers<Pair<L, boxed::Layer<A, B>>>
@@ -131,8 +130,8 @@ impl<L> Layers<L> {
         self.push(http::boxed::response::Layer::new())
     }
 
-    pub fn push_oneshot(self) -> Layers<Pair<L, oneshot::Layer>> {
-        self.push(oneshot::Layer::new())
+    pub fn push_oneshot(self) -> Layers<Pair<L, stack::OneshotLayer>> {
+        self.push(stack::OneshotLayer::new())
     }
 
     pub fn push_instrument<G: Clone>(self, get_span: G) -> Layers<Pair<L, InstrumentMakeLayer<G>>> {
@@ -157,8 +156,8 @@ impl<S> Stack<S> {
     pub fn push_map_target<M: Clone>(
         self,
         map_target: M,
-    ) -> Stack<map_target::MapTargetService<S, M>> {
-        self.push(map_target::MapTargetLayer::new(map_target))
+    ) -> Stack<stack::map_target::MapTargetService<S, M>> {
+        self.push(stack::map_target::MapTargetLayer::new(map_target))
     }
 
     pub fn instrument<G: Clone>(self, get_span: G) -> Stack<InstrumentMake<G, S>> {
@@ -170,12 +169,12 @@ impl<S> Stack<S> {
     }
 
     /// Wraps an inner `MakeService` to be a `NewService`.
-    pub fn into_new_service(self) -> Stack<new_service::FromMakeService<S>> {
-        self.push(new_service::FromMakeServiceLayer::default())
+    pub fn into_new_service(self) -> Stack<stack::new_service::FromMakeService<S>> {
+        self.push(stack::new_service::FromMakeServiceLayer::default())
     }
 
-    pub fn push_make_ready<Req>(self) -> Stack<MakeReady<S, Req>> {
-        self.push(MakeReadyLayer::new())
+    pub fn push_make_ready<Req>(self) -> Stack<stack::MakeReady<S, Req>> {
+        self.push(stack::MakeReadyLayer::new())
     }
 
     pub fn push_lock(self) -> Stack<lock::LockService<S>> {
@@ -224,15 +223,15 @@ impl<S> Stack<S> {
         }))
     }
 
-    pub fn push_oneshot(self) -> Stack<oneshot::Oneshot<S>> {
-        self.push(oneshot::Layer::new())
+    pub fn push_oneshot(self) -> Stack<stack::Oneshot<S>> {
+        self.push(stack::OneshotLayer::new())
     }
 
     pub fn push_map_response<R: Clone>(
         self,
         map_response: R,
-    ) -> Stack<map_response::MapResponse<S, R>> {
-        self.push(map_response::Layer::new(map_response))
+    ) -> Stack<stack::MapResponse<S, R>> {
+        self.push(stack::MapResponseLayer::new(map_response))
     }
 
     pub fn push_http_insert_target(self) -> Stack<http::insert::target::NewService<S>> {
@@ -256,20 +255,20 @@ impl<S> Stack<S> {
         )
     }
 
-    pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<fallback::Fallback<S, F>> {
-        self.push(fallback::FallbackLayer::new(fallback))
+    pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<stack::Fallback<S, F>> {
+        self.push(stack::FallbackLayer::new(fallback))
     }
 
     pub fn push_fallback_with_predicate<F, P>(
         self,
         fallback: F,
         predicate: P,
-    ) -> Stack<fallback::Fallback<S, F, P>>
+    ) -> Stack<stack::Fallback<S, F, P>>
     where
         F: Clone,
         P: Fn(&Error) -> bool + Clone,
     {
-        self.push(fallback::FallbackLayer::new(fallback).with_predicate(predicate))
+        self.push(stack::FallbackLayer::new(fallback).with_predicate(predicate))
     }
 
     pub fn boxed<A>(self) -> Stack<boxed::BoxService<A, S::Response>>

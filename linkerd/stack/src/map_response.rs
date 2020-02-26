@@ -7,7 +7,7 @@ pub trait ResponseMap<Rsp> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Layer<R>(R);
+pub struct MapResponseLayer<R>(R);
 
 #[derive(Clone, Debug)]
 pub struct MapResponse<S, R> {
@@ -15,13 +15,13 @@ pub struct MapResponse<S, R> {
     response_map: R,
 }
 
-impl<R> Layer<R> {
+impl<R> MapResponseLayer<R> {
     pub fn new(response_map: R) -> Self {
-        Layer(response_map)
+        MapResponseLayer(response_map)
     }
 }
 
-impl<S, R: Clone> tower::layer::Layer<S> for Layer<R> {
+impl<S, R: Clone> tower::layer::Layer<S> for MapResponseLayer<R> {
     type Service = MapResponse<S, R>;
 
     fn layer(&self, inner: S) -> Self::Service {

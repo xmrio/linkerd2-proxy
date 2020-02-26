@@ -1,20 +1,20 @@
 use futures::Poll;
 
 #[derive(Copy, Clone, Debug)]
-pub struct Layer(());
+pub struct OneshotLayer(());
 
 #[derive(Clone, Debug)]
 pub struct Oneshot<S>(S);
 
-// === impl Layer ===
+// === impl OneshotLayer ===
 
-impl Layer {
-    pub fn new() -> Layer {
-        Layer(())
+impl OneshotLayer {
+    pub fn new() -> OneshotLayer {
+        OneshotLayer(())
     }
 }
 
-impl<S> tower::layer::Layer<S> for Layer {
+impl<S> tower::layer::Layer<S> for OneshotLayer {
     type Service = Oneshot<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
