@@ -172,7 +172,7 @@ where
         let sender_clone = sender.clone();
 
         let peer_identity = Some(client_target_name.clone());
-        let client = tls::client::Layer::new(client_tls)
+        let client = tls::ConnectLayer::new(client_tls)
             .layer(connect::Connect::new(None))
             .oneshot(Target(server_addr, client_target_name))
             .map_err(move |e| {
