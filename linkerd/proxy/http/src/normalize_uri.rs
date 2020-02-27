@@ -100,6 +100,11 @@ where
 
     fn call(&mut self, mut request: http::Request<B>) -> Self::Future {
         if let Some(ref default_authority) = self.authority {
+            // If an authority was set, we know that normalization is needed.
+            // Use the authority from the stack as a fallback, preferrring the
+            // value from each request. This ensures that we don't modify
+            // request semantics if, for instance, the stack's authority is
+            // canonical but the request's authority is relative.
             let authority = request
                 .uri()
                 .authority_part()
@@ -112,8 +117,6 @@ where
                 "normalize_uri must only be applied to HTTP/1"
             );
             h1::set_authority(request.uri_mut(), authority.clone());
-        } else {
-            trace!("Not normalizing URI");
         }
 
         self.inner.call(request)

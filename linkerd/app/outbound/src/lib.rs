@@ -41,6 +41,7 @@ mod endpoint;
 mod orig_proto_upgrade;
 mod require_identity_on_endpoint;
 
+use self::orig_proto_upgrade::OrigProtoUpgradeLayer;
 use self::require_identity_on_endpoint::MakeRequireIdentityLayer;
 
 const EWMA_DEFAULT_RTT: Duration = Duration::from_millis(30);
@@ -171,7 +172,7 @@ impl<A: OrigDstAddr> Config<A> {
                     //
                     // This sets headers so that the inbound proxy can downgrade the
                     // request properly.
-                    .push(orig_proto_upgrade::layer())
+                    .push(OrigProtoUpgradeLayer::new())
                     .check_service::<Target<HttpEndpoint>>()
                     .instrument(|endpoint: &Target<HttpEndpoint>| {
                         info_span!("endpoint", peer.addr = %endpoint.inner.addr)

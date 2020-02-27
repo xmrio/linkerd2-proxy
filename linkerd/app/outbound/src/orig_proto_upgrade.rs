@@ -1,70 +1,73 @@
-use super::{HttpEndpoint, Target};
 use crate::proxy::http::{orig_proto, settings::Settings};
-use crate::svc;
+use crate::svc::stack;
+use crate::{HttpEndpoint, Target};
 use futures::{try_ready, Future, Poll};
+use tower::util::Either;
 use tracing::trace;
 
-#[derive(Clone, Debug)]
-pub struct Layer(());
+#[derive(Clone, Debug, Default)]
+pub struct OrigProtoUpgradeLayer(());
 
 #[derive(Clone, Debug)]
-pub struct MakeSvc<M> {
+pub struct OrigProtoUpgrade<M> {
     inner: M,
 }
 
-pub struct MakeFuture<F> {
+pub struct UpgradeFuture<F> {
     can_upgrade: bool,
     inner: F,
     was_absolute: bool,
 }
 
-pub fn layer() -> Layer {
-    Layer(())
-}
-
-impl<M> svc::Layer<M> for Layer {
-    type Service = MakeSvc<M>;
-
-    fn layer(&self, inner: M) -> Self::Service {
-        MakeSvc { inner }
+impl OrigProtoUpgradeLayer {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-// === impl MakeSvc ===
+impl<M> tower::layer::Layer<M> for OrigProtoUpgradeLayer {
+    type Service = OrigProtoUpgrade<M>;
 
-impl<N> svc::NewService<Target<HttpEndpoint>> for MakeSvc<N>
+    fn layer(&self, inner: M) -> Self::Service {
+        Self::Service { inner }
+    }
+}
+
+// === impl OrigProtoUpgrade ===
+
+impl<N> stack::NewService<Target<HttpEndpoint>> for OrigProtoUpgrade<N>
 where
-    N: svc::NewService<Target<HttpEndpoint>>,
+    N: stack::NewService<Target<HttpEndpoint>>,
 {
-    type Service = svc::Either<orig_proto::Upgrade<N::Service>, N::Service>;
+    type Service = Either<orig_proto::Upgrade<N::Service>, N::Service>;
 
     fn new_service(&self, mut endpoint: Target<HttpEndpoint>) -> Self::Service {
         if !endpoint.inner.can_use_orig_proto() {
             trace!("Endpoint does not support transparent HTTP/2 upgrades");
-            return svc::Either::B(self.inner.new_service(endpoint));
+            return Either::B(self.inner.new_service(endpoint));
         }
 
         let was_absolute = endpoint.inner.settings.was_absolute_form();
         trace!(
             header = %orig_proto::L5D_ORIG_PROTO,
-            %was_absolute,
+            was_absolute,
             "Endpoint supports transparent HTTP/2 upgrades",
         );
         endpoint.inner.settings = Settings::Http2;
 
         let mut upgrade = orig_proto::Upgrade::new(self.inner.new_service(endpoint));
         upgrade.absolute_form = was_absolute;
-        svc::Either::A(upgrade)
+        Either::A(upgrade)
     }
 }
 
-impl<M> svc::Service<Target<HttpEndpoint>> for MakeSvc<M>
+impl<M> tower::Service<Target<HttpEndpoint>> for OrigProtoUpgrade<M>
 where
-    M: svc::Service<Target<HttpEndpoint>>,
+    M: tower::Service<Target<HttpEndpoint>>,
 {
-    type Response = svc::Either<orig_proto::Upgrade<M::Response>, M::Response>;
+    type Response = Either<orig_proto::Upgrade<M::Response>, M::Response>;
     type Error = M::Error;
-    type Future = MakeFuture<M::Future>;
+    type Future = UpgradeFuture<M::Future>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         self.inner.poll_ready()
@@ -84,7 +87,7 @@ where
         }
 
         let inner = self.inner.call(endpoint);
-        MakeFuture {
+        UpgradeFuture {
             can_upgrade,
             inner,
             was_absolute,
@@ -92,24 +95,23 @@ where
     }
 }
 
-// === impl MakeFuture ===
+// === impl UpgradeFuture ===
 
-impl<F> Future for MakeFuture<F>
+impl<F> Future for UpgradeFuture<F>
 where
     F: Future,
 {
-    type Item = svc::Either<orig_proto::Upgrade<F::Item>, F::Item>;
+    type Item = Either<orig_proto::Upgrade<F::Item>, F::Item>;
     type Error = F::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let inner = try_ready!(self.inner.poll());
 
         if self.can_upgrade {
-            let mut upgrade = orig_proto::Upgrade::new(inner);
-            upgrade.absolute_form = self.was_absolute;
-            Ok(svc::Either::A(upgrade).into())
+            let mut upgrade = orig_proto::Upgrade::new(inner, self.was_absolute);
+            Ok(Either::A(upgrade).into())
         } else {
-            Ok(svc::Either::B(inner).into())
+            Ok(Either::B(inner).into())
         }
     }
 }
