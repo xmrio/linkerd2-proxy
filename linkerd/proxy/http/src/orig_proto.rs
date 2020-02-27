@@ -29,10 +29,6 @@ impl<S> Upgrade<S> {
             absolute_form,
         }
     }
-
-    pub fn is_absolute_form(&self) -> bool {
-        self.absolute_form
-    }
 }
 
 impl<S, A, B> tower::Service<http::Request<A>> for Upgrade<S>
