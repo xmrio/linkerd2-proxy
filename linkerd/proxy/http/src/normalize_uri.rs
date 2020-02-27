@@ -41,8 +41,6 @@ where
 
     fn new_service(&self, target: T) -> Self::Service {
         let authority = target.should_normalize_uri();
-        tracing::trace!(?authority, "new");
-
         let inner = self.inner.new_service(target);
         NormalizeUri { inner, authority }
     }
@@ -63,8 +61,6 @@ where
 
     fn call(&mut self, target: T) -> Self::Future {
         let authority = target.should_normalize_uri();
-        tracing::trace!(?authority, "make");
-
         MakeFuture {
             authority,
             inner: self.inner.call(target),
