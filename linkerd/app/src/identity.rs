@@ -57,7 +57,6 @@ impl Config {
                     .push_on_response(proxy::grpc::req_body_as_payload::layer())
                     .push(control::add_origin::Layer::new())
                     .into_new_service()
-                    .push_on_response(svc::layers().push_lock())
                     .new_service(addr.clone());
 
                 // Save to be spawned on an auxiliary runtime.

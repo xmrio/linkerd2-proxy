@@ -154,7 +154,7 @@ where
 
 impl<T> Future for Daemon<T>
 where
-    T: GrpcService<BoxBody> + Clone,
+    T: GrpcService<BoxBody>,
 {
     type Item = ();
     type Error = Never;
