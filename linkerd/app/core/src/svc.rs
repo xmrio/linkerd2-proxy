@@ -76,16 +76,17 @@ impl<L> Layers<L> {
         self.push(buffer::Layer::new(bound))
     }
 
+    /// Makes the inner service shareable in a mutually-exclusive fashion.
+    pub fn push_lock(self) -> Layers<Pair<L, lock::LockLayer>> {
+        self.push(lock::LockLayer::new())
+    }
+
     pub fn push_on_response<U>(self, layer: U) -> Layers<Pair<L, stack::OnResponseLayer<U>>> {
         self.push(stack::OnResponseLayer::new(layer))
     }
 
     pub fn push_spawn_ready(self) -> Layers<Pair<L, SpawnReadyLayer>> {
         self.push(SpawnReadyLayer::new())
-    }
-
-    pub fn push_lock(self) -> Layers<Pair<L, lock::LockLayer>> {
-        self.push(lock::LockLayer::new())
     }
 
     pub fn push_concurrency_limit(self, max: usize) -> Layers<Pair<L, concurrency_limit::Layer>> {
@@ -175,10 +176,6 @@ impl<S> Stack<S> {
 
     pub fn push_make_ready<Req>(self) -> Stack<stack::MakeReady<S, Req>> {
         self.push(stack::MakeReadyLayer::new())
-    }
-
-    pub fn push_lock(self) -> Stack<lock::LockService<S>> {
-        self.push(lock::LockLayer::new())
     }
 
     /// Buffer requests when when the next layer is out of capacity.

@@ -156,7 +156,7 @@ impl<A: OrigDstAddr> Config<A> {
                     // Prior-knowledge HTTP/2 is typically used (i.e. when
                     // communicating with other proxies); though HTTP/1.x fallback
                     // is supported as needed.
-                    .push(http::client::layer(connect.h2_settings))
+                    .push(http::MakeClientLayer::new(connect.h2_settings))
                     // Re-establishes a connection when the client fails.
                     .push(reconnect::layer({
                         let backoff = connect.backoff.clone();

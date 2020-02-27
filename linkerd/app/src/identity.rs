@@ -58,7 +58,6 @@ impl Config {
                     .push(control::add_origin::Layer::new())
                     .into_new_service()
                     .push_on_response(svc::layers().push_lock())
-                    .into_inner()
                     .new_service(addr.clone());
 
                 // Save to be spawned on an auxiliary runtime.

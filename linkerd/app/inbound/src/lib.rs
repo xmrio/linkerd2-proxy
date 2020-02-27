@@ -17,7 +17,7 @@ use linkerd2_app_core::{
     profiles,
     proxy::{
         self,
-        http::{client, normalize_uri, orig_proto, strip_header},
+        http::{self, normalize_uri, orig_proto, strip_header},
         identity,
         server::{Protocol as ServerProtocol, Server},
         tap, tcp,
@@ -109,7 +109,7 @@ impl<A: OrigDstAddr> Config<A> {
 
             // Caches HTTP clients for each inbound port & HTTP settings.
             let http_endpoint_cache = tcp_connect
-                .push(client::layer(connect.h2_settings))
+                .push(http::MakeClientLayer::new(connect.h2_settings))
                 .push(reconnect::layer({
                     let backoff = connect.backoff.clone();
                     move |_| Ok(backoff.stream())

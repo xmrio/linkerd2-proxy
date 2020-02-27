@@ -65,8 +65,6 @@ impl Config {
                     .push(control::add_origin::Layer::new())
                     .into_new_service()
                     .push_on_response(svc::layers().push_lock())
-                    .check_new_service::<ControlAddr>()
-                    .into_inner()
                     .new_service(addr.clone());
 
                 let (span_sink, spans_rx) = mpsc::channel(Self::SPAN_BUFFER_CAPACITY);

@@ -122,7 +122,7 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                 // XXX This is unfortunate. But we don't daemonize the service into a
                 // task in the build, so we'd have to name it. And that's not
                 // happening today. Really, we should daemonize the whole client
-                // into a task so consumers can be ignorant. This woudld also
+                // into a task so consumers can be ignorant. This would also
                 // probably enable the use of a lock.
                 let svc = svc::connect(dst.control.connect.keepalive)
                     .push(tls::ConnectLayer::new(identity.local()))
@@ -139,9 +139,6 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                     .push_on_response(
                         svc::layers()
                             .push(grpc::req_body_as_payload::layer())
-                            // This stack isn't currently Sync; so a Buffer
-                            // needs to be used instead of a Lock.
-                            // TODO .push(svc::lock::Layer::default())
                             .push_buffer(dst.control.buffer_capacity),
                     )
                     .new_service(dst.control.addr.clone());
