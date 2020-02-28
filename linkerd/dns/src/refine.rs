@@ -5,9 +5,11 @@ use std::convert::TryFrom;
 use std::time::Instant;
 use trust_dns_resolver::{error::ResolveError, lookup_ip::LookupIp, AsyncResolver};
 
+/// A `MakeService` that produces a `Refine` for a given name.
 #[derive(Clone)]
 pub struct MakeRefine(pub(super) AsyncResolver);
 
+/// A `Service` that produces the most recent result if one is known.
 pub struct Refine {
     resolver: AsyncResolver,
     name: Name,
