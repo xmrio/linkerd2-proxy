@@ -187,7 +187,7 @@ impl<A: OrigDstAddr> Config<A> {
             // on the resolution stream. If the buffer is full for
             // `cache_max_idle_age`, then the resolution task fails.
             let discover = {
-                const BUFFER_CAPACITY: usize = 10;
+                const BUFFER_CAPACITY: usize = 1_000;
                 let resolve = map_endpoint::Resolve::new(endpoint::FromMetadata, resolve.clone());
                 discover::Layer::new(BUFFER_CAPACITY, cache_max_idle_age, resolve)
             };
