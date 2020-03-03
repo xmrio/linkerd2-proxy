@@ -69,16 +69,28 @@ impl<L> Layers<L> {
     }
 
     /// Buffers requests in an mpsc, spawning the inner service onto a dedicated task.
-    pub fn push_buffer<Req>(self, bound: usize) -> Layers<Pair<L, buffer::Layer<Req>>>
+    pub fn push_spawn_buffer<Req>(
+        self,
+        capacity: usize,
+        probe_timeout: Duration,
+    ) -> Layers<Pair<L, buffer::SpawnProbeBufferLayer<Req>>>
     where
         Req: Send + 'static,
     {
-        self.push(buffer::Layer::new(bound))
+        self.push(buffer::SpawnProbeBufferLayer::new(capacity, probe_timeout))
     }
 
     /// Makes the inner service shareable in a mutually-exclusive fashion.
     pub fn push_lock(self) -> Layers<Pair<L, lock::LockLayer>> {
         self.push(lock::LockLayer::new())
+    }
+
+    pub fn push_idle_timeout(self, timeout: Duration) -> Layers<Pair<L, timeout::IdleLayer>> {
+        self.push(timeout::IdleLayer::new(timeout))
+    }
+
+    pub fn push_failfast(self, timeout: Duration) -> Layers<Pair<L, timeout::FailFastLayer>> {
+        self.push(timeout::FailFastLayer::new(timeout))
     }
 
     pub fn push_on_response<U>(self, layer: U) -> Layers<Pair<L, stack::OnResponseLayer<U>>> {
@@ -99,10 +111,6 @@ impl<L> Layers<L> {
 
     pub fn push_make_ready<Req>(self) -> Layers<Pair<L, stack::MakeReadyLayer<Req>>> {
         self.push(stack::MakeReadyLayer::new())
-    }
-
-    pub fn push_ready_timeout(self, timeout: Duration) -> Layers<Pair<L, timeout::ready::Layer>> {
-        self.push(timeout::ready::Layer::new(timeout))
     }
 
     pub fn push_map_response<R: Clone>(
@@ -179,14 +187,19 @@ impl<S> Stack<S> {
     }
 
     /// Buffer requests when when the next layer is out of capacity.
-    pub fn push_buffer<Req>(self, bound: usize) -> Stack<buffer::Buffer<S, Req>>
+    pub fn spawn_buffer<Req>(
+        self,
+        capacity: usize,
+        probe_timeout: Duration,
+    ) -> Stack<buffer::ProbeBuffer<Req, S::Response>>
     where
         Req: Send + 'static,
         S: Service<Req> + Send + 'static,
+        S::Response: Send + 'static,
         S::Error: Into<Error> + Send + Sync,
         S::Future: Send,
     {
-        self.push(buffer::Layer::new(bound))
+        self.push(buffer::SpawnProbeBufferLayer::new(capacity, probe_timeout))
     }
 
     /// Assuming `S` implements `NewService` or `MakeService`, applies the given
@@ -214,10 +227,12 @@ impl<S> Stack<S> {
         self.push(tower::timeout::TimeoutLayer::new(timeout))
     }
 
-    pub fn push_ready_timeout(self, timeout: Duration) -> Stack<timeout::ready::TimeoutReady<S>> {
-        self.push(layer::mk(|inner| {
-            timeout::ready::TimeoutReady::new(inner, timeout)
-        }))
+    pub fn push_idle_timeout(self, timeout: Duration) -> Stack<timeout::Idle<S>> {
+        self.push(timeout::IdleLayer::new(timeout))
+    }
+
+    pub fn push_failfast(self, timeout: Duration) -> Stack<timeout::FailFast<S>> {
+        self.push(timeout::FailFastLayer::new(timeout))
     }
 
     pub fn push_oneshot(self) -> Stack<stack::Oneshot<S>> {
@@ -232,21 +247,14 @@ impl<S> Stack<S> {
         self.push(http::insert::target::layer())
     }
 
-    pub fn spawn_cache<T>(
-        self,
-        capacity: usize,
-        max_idle_age: Duration,
-    ) -> Stack<cache::Service<T, S>>
+    pub fn cache<T, L, U>(self, track: L) -> Stack<cache::Cache<T, cache::layer::NewTrack<L, S>>>
     where
-        T: Clone + Eq + std::hash::Hash + Send + 'static,
-        S: NewService<T> + Send + 'static,
-        S::Service: Clone + Send + 'static,
+        T: Eq + std::hash::Hash,
+        S: NewService<T> + Clone,
+        L: tower::layer::Layer<cache::layer::Track<S>> + Clone,
+        L::Service: NewService<T, Service = U>,
     {
-        Stack(
-            cache::Layer::new(capacity, max_idle_age)
-                .layer(self.0)
-                .spawn(),
-        )
+        self.push(cache::CacheLayer::new(track))
     }
 
     pub fn push_fallback<F: Clone>(self, fallback: F) -> Stack<stack::Fallback<S, F>> {

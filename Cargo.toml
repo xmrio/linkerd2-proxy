@@ -28,6 +28,7 @@ members = [
     "linkerd/lock",
     "linkerd/metrics",
     "linkerd/opencensus",
+    "linkerd/probe-buffer",
     "linkerd/proxy/api-resolve",
     "linkerd/proxy/core",
     "linkerd/proxy/detect",

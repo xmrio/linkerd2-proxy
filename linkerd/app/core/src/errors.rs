@@ -1,7 +1,6 @@
 use crate::proxy::http::timeout::error as timeout;
 use crate::proxy::identity;
 use http::{header::HeaderValue, StatusCode};
-use linkerd2_cache::error as cache;
 use linkerd2_error::Error;
 use linkerd2_error_metrics as metrics;
 use linkerd2_error_respond as respond;
@@ -29,7 +28,6 @@ pub type Label = (super::metric_labels::Direction, Reason);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Reason {
-    CacheFull,
     DispatchTimeout,
     ResponseTimeout,
     IdentityRequired,
@@ -114,8 +112,6 @@ impl<B: Default> respond::Respond for Respond<B> {
 fn http_status(error: &Error) -> StatusCode {
     if error.is::<timeout::ResponseTimeout>() {
         http::StatusCode::GATEWAY_TIMEOUT
-    } else if error.is::<cache::NoCapacity>() {
-        http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<shed::Overloaded>() {
         http::StatusCode::SERVICE_UNAVAILABLE
     } else if error.is::<tower::timeout::error::Elapsed>() {
@@ -137,14 +133,6 @@ fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) -> grpc::Code {
         let code = Code::DeadlineExceeded;
         headers.insert(GRPC_STATUS, code_header(code));
         headers.insert(GRPC_MESSAGE, HeaderValue::from_static("request timed out"));
-        code
-    } else if error.is::<cache::NoCapacity>() {
-        let code = Code::Unavailable;
-        headers.insert(GRPC_STATUS, code_header(code));
-        headers.insert(
-            GRPC_MESSAGE,
-            HeaderValue::from_static("proxy router cache exhausted"),
-        );
         code
     } else if error.is::<shed::Overloaded>() {
         let code = Code::Unavailable;
@@ -236,8 +224,6 @@ impl metrics::LabelError<Error> for LabelError {
     fn label_error(&self, err: &Error) -> Self::Labels {
         let reason = if err.is::<timeout::ResponseTimeout>() {
             Reason::ResponseTimeout
-        } else if err.is::<cache::NoCapacity>() {
-            Reason::CacheFull
         } else if err.is::<shed::Overloaded>() {
             Reason::LoadShed
         } else if err.is::<tower::timeout::error::Elapsed>() {
@@ -258,7 +244,6 @@ impl metrics::FmtLabels for Reason {
             f,
             "message=\"{}\"",
             match self {
-                Reason::CacheFull => "cache full",
                 Reason::LoadShed => "load shed",
                 Reason::DispatchTimeout => "dispatch timeout",
                 Reason::ResponseTimeout => "response timeout",

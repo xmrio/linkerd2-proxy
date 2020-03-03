@@ -96,7 +96,7 @@ impl<A: OrigDstAddr> Config<A> {
                 ProxyConfig {
                     server: ServerConfig { bind, h2_settings },
                     connect,
-                    cache_capacity,
+                    cache_capacity: _,
                     cache_max_idle_age,
                     disable_protocol_detection_for_ports,
                     dispatch_timeout,
@@ -192,10 +192,6 @@ impl<A: OrigDstAddr> Config<A> {
                 discover::Layer::new(BUFFER_CAPACITY, cache_max_idle_age, resolve)
             };
 
-            // If the balancer fails to be created, i.e., because it is
-            // unresolvable, fall back to using a router that dispatches request
-            // to the application-selected original destination.
-
             // Builds a balancer for each concrete destination.
             let http_balancer = http_endpoint
                 .clone()
@@ -210,38 +206,41 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(discover)
                 .push_on_response(http::balance::layer(EWMA_DEFAULT_RTT, EWMA_DECAY))
                 .into_new_service()
-                // Shares the balancer, ensuring discovery errors are propagated.
-                .push_on_response(
+                .cache(
                     svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("balance"))),
+                        // Shares the balancer, ensuring discovery errors are propagated.
+                        .push_on_response(
+                            svc::layers()
+                                .push_lock()
+                                .push(metrics.stack.layer(stack_labels("balance"))),
+                        ),
                 )
                 .instrument(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
-            let http_balancer_cache = info_span!("balance")
-                .in_scope(|| http_balancer.spawn_cache(cache_capacity, cache_max_idle_age));
 
             // Caches clients that bypass discovery/balancing.
             //
             // This is effectively the same as the endpoint stack; but the
             // client layer captures the requst body type (via PhantomData), so
             // the stack cannot be shared directly.
-            let http_forward = http_endpoint
+            let http_forward_cache = http_endpoint
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
                 .into_new_service()
-                .push_on_response(svc::layers().box_http_request().push_lock())
-                .push_on_response(metrics.stack.layer(stack_labels("forward.endpoint")))
+                .cache(
+                    svc::layers().push_on_response(svc::layers().box_http_request().push_lock().push(metrics.stack.layer(stack_labels("forward.endpoint"))))
+                )
                 .instrument(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
-                });
-            let http_forward_cache = info_span!("forward")
-                .in_scope(|| http_forward.spawn_cache(cache_capacity, cache_max_idle_age))
+                })
                 .push_map_target(|t: Concrete<HttpEndpoint>| Target {
                     addr: t.addr.into(),
                     inner: t.inner.inner,
                 })
                 .check_service::<Concrete<HttpEndpoint>>();
 
-            let http_concrete = http_balancer_cache
+            // If the balancer fails to be created, i.e., because it is
+            // unresolvable, fall back to using a router that dispatches request
+            // to the application-selected original destination.
+            let http_concrete = http_balancer
                 .push_map_target(|c: Concrete<HttpEndpoint>| c.map(|l| l.map(|e| e.settings)))
                 .check_service::<Concrete<HttpEndpoint>>()
                 .push_on_response(svc::layers().box_http_response())
@@ -273,7 +272,7 @@ impl<A: OrigDstAddr> Config<A> {
             // Routes `Logical` targets to a cached `Profile` stack, i.e. so
             // that profile resolutions are shared even as the type of request
             // may vary.
-            let http_profile = http_concrete
+            let http_logical_profile_cache = http_concrete
                 .clone()
                 .push_on_response(svc::layers().box_http_request())
                 .check_service::<Concrete<HttpEndpoint>>()
@@ -294,16 +293,15 @@ impl<A: OrigDstAddr> Config<A> {
                     }),
                 )
                 .into_new_service()
-                .push_on_response(
-                    svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("profile"))),
+                .cache(
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("profile"))),
+                    ),
                 )
-                .instrument(|_: &Profile| info_span!("profile"));
-
-            let http_logical_profile_cache = info_span!("profile")
-                .in_scope(|| http_profile.spawn_cache(cache_capacity, cache_max_idle_age))
-                .check_service::<Profile>()
+                .instrument(|_: &Profile| info_span!("profile"))
+                .check_make_service::<Profile, Logical<HttpEndpoint>>()
                 .push(router::Layer::new(|()| ProfilePerTarget))
                 .check_new_service_routes::<(), Logical<HttpEndpoint>>()
                 .new_service(());
@@ -312,15 +310,15 @@ impl<A: OrigDstAddr> Config<A> {
             //
             // For example, a client may send requests to `foo` or `foo.ns`; and
             // the canonical form of these names is `foo.ns.svc.cluster.local
-            let dns_refine = svc::stack(dns_resolver.into_make_refine())
-                .push_on_response(
-                    svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("canonicalize"))),
+            let dns_refine_cache = svc::stack(dns_resolver.into_make_refine())
+                .cache(
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("canonicalize"))),
+                    ),
                 )
-                .instrument(|name: &dns::Name| info_span!("canonicalize", %name));
-            let dns_refine_cache = info_span!("canonicalize")
-                .in_scope(|| dns_refine.spawn_cache(cache_capacity, cache_max_idle_age))
+                .instrument(|name: &dns::Name| info_span!("canonicalize", %name))
                 // Obtains the lock, advances the state of the resolution
                 .push(svc::make_response::Layer)
                 // Ensures that the cache isn't locked when polling readiness.

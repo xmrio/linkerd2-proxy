@@ -23,6 +23,7 @@ use linkerd2_app_core::{
 use linkerd2_app_inbound as inbound;
 use linkerd2_app_outbound as outbound;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tracing::{debug, error, info, info_span};
 use tracing_futures::Instrument;
 
@@ -139,7 +140,10 @@ impl<A: OrigDstAddr + Send + 'static> Config<A> {
                     .push_on_response(
                         svc::layers()
                             .push(grpc::req_body_as_payload::layer())
-                            .push_buffer(dst.control.buffer_capacity),
+                            .push_spawn_buffer(
+                                dst.control.buffer_capacity,
+                                Duration::from_secs(10),
+                            ),
                     )
                     .new_service(dst.control.addr.clone());
                 dst.build(svc)

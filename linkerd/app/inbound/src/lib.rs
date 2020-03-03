@@ -77,8 +77,8 @@ impl<A: OrigDstAddr> Config<A> {
                 ProxyConfig {
                     server: ServerConfig { bind, h2_settings },
                     connect,
-                    cache_capacity,
-                    cache_max_idle_age,
+                    cache_capacity: _,
+                    cache_max_idle_age: _,
                     disable_protocol_detection_for_ports,
                     dispatch_timeout,
                     max_in_flight_requests,
@@ -115,12 +115,13 @@ impl<A: OrigDstAddr> Config<A> {
                     move |_| Ok(backoff.stream())
                 }))
                 .into_new_service()
-                .push_on_response(
-                    svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("endpoint"))),
+                .cache(
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("endpoint"))),
+                    ),
                 )
-                .spawn_cache(cache_capacity, cache_max_idle_age)
                 .instrument(|ep: &HttpEndpoint| {
                     info_span!(
                         "endpoint",
@@ -159,13 +160,13 @@ impl<A: OrigDstAddr> Config<A> {
                 .push(normalize_uri::layer())
                 .push(http_target_observability)
                 .into_new_service()
-                .push_on_response(
-                    svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("target"))),
+                .cache(
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("target"))),
+                    ),
                 )
-                .check_new_clone_service::<Target>()
-                .spawn_cache(cache_capacity, cache_max_idle_age)
                 .instrument(|_: &Target| info_span!("target"))
                 .check_service::<Target>();
 
@@ -181,14 +182,15 @@ impl<A: OrigDstAddr> Config<A> {
                     http_profile_route_proxy.into_inner(),
                 ))
                 .into_new_service()
-                .push_on_response(
-                    svc::layers()
-                        .push_lock()
-                        .push(metrics.stack.layer(stack_labels("profile"))),
-                )
                 // Caches profile stacks.
-                .check_new_clone_service::<Profile>()
-                .spawn_cache(cache_capacity, cache_max_idle_age)
+                .check_new_service_routes::<Profile, Target>()
+                .cache(
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("profile"))),
+                    ),
+                )
                 .instrument(|p: &Profile| info_span!("profile", addr = %p.addr()))
                 .check_service::<Profile>()
                 .push(router::Layer::new(|()| ProfileTarget))

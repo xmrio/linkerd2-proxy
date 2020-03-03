@@ -34,6 +34,7 @@ linkerd2-http-metrics = { path = "../../http-metrics" }
 linkerd2-lock = { path = "../../lock" }
 linkerd2-metrics = { path = "../../metrics" }
 linkerd2-opencensus = { path = "../../opencensus" }
+linkerd2-probe-buffer = { path = "../../probe-buffer" }
 linkerd2-proxy-core = { path = "../../proxy/core" }
 linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", tag = "v0.1.11" }
 linkerd2-proxy-api-resolve = { path = "../../proxy/api-resolve" }

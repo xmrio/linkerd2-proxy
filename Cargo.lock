@@ -640,6 +640,7 @@ dependencies = [
  "linkerd2-lock",
  "linkerd2-metrics",
  "linkerd2-opencensus",
+ "linkerd2-probe-buffer",
  "linkerd2-proxy-api",
  "linkerd2-proxy-api-resolve",
  "linkerd2-proxy-core",
@@ -776,6 +777,7 @@ dependencies = [
  "linkerd2-stack",
  "tokio",
  "tower",
+ "tower-ready-cache",
  "tracing",
  "tracing-futures",
 ]
@@ -976,6 +978,18 @@ dependencies = [
  "tokio",
  "tower-grpc",
  "tracing",
+]
+
+[[package]]
+name = "linkerd2-probe-buffer"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "linkerd2-error",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
@@ -1319,9 +1333,11 @@ dependencies = [
  "futures",
  "linkerd2-error",
  "linkerd2-stack",
+ "tokio",
  "tokio-connect",
  "tokio-timer",
  "tower",
+ "tower-test",
  "tracing",
 ]
 
@@ -2594,6 +2610,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tower-util",
+]
+
+[[package]]
+name = "tower-test"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99a0b25036e2c58f681a04a5b312e9283d229445ad5e1221a1b7a4630df6fbdf"
+dependencies = [
+ "futures",
+ "tokio-sync",
+ "tower-service",
 ]
 
 [[package]]
