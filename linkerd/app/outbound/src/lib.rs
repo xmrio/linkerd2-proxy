@@ -211,6 +211,9 @@ impl<A: OrigDstAddr> Config<A> {
                         // Shares the balancer, ensuring discovery errors are propagated.
                         .push_on_response(
                             svc::layers()
+                                // .push_idle_timeout(cache_max_idle_age)
+                                // .push_failfast(Duration::from_secs(10))
+                                // .push_spawn_buffer(10, cache_max_idle_age / 2)
                                 .push_lock()
                                 .push(metrics.stack.layer(stack_labels("balance"))),
                         ),

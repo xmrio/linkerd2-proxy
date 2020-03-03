@@ -84,7 +84,7 @@ where
 
             // The inner service is ready, so poll for new requests.
             match self.rx.poll() {
-                // The sender has been dropped, complete (notifying in-flight requests).
+                // The sender has been dropped, complete.
                 Err(_) | Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
 
                 // If a request was ready, spawn its response future
