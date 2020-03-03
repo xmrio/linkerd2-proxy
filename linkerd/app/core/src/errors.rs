@@ -1,5 +1,5 @@
 use crate::proxy::http::timeout::error as timeout;
-use crate::proxy::identity;
+use crate::proxy::{buffer, identity};
 use http::{header::HeaderValue, StatusCode};
 use linkerd2_error::Error;
 use linkerd2_error_metrics as metrics;
@@ -120,6 +120,8 @@ fn http_status(error: &Error) -> StatusCode {
         http::StatusCode::FORBIDDEN
     } else if let Some(e) = error.downcast_ref::<lock::error::ServiceError>() {
         http_status(e.inner())
+    } else if let Some(e) = error.downcast_ref::<buffer::error::ServiceError>() {
+        http_status(e.inner())
     } else {
         http::StatusCode::BAD_GATEWAY
     }
@@ -158,6 +160,8 @@ fn set_grpc_status(error: &Error, headers: &mut http::HeaderMap) -> grpc::Code {
         }
         code
     } else if let Some(e) = error.downcast_ref::<lock::error::ServiceError>() {
+        set_grpc_status(e.inner(), headers)
+    } else if let Some(e) = error.downcast_ref::<buffer::error::ServiceError>() {
         set_grpc_status(e.inner(), headers)
     } else {
         let code = Code::Internal;

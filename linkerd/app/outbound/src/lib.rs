@@ -211,10 +211,10 @@ impl<A: OrigDstAddr> Config<A> {
                         // Shares the balancer, ensuring discovery errors are propagated.
                         .push_on_response(
                             svc::layers()
-                                // .push_idle_timeout(cache_max_idle_age)
-                                // .push_failfast(Duration::from_secs(10))
-                                // .push_spawn_buffer(10, cache_max_idle_age / 2)
-                                .push_lock()
+                                .push_idle_timeout(cache_max_idle_age)
+                                .push_failfast(Duration::from_secs(10))
+                                .push_spawn_buffer(10, cache_max_idle_age / 2)
+                                //.push_lock()
                                 .push(metrics.stack.layer(stack_labels("balance"))),
                         ),
                 )
@@ -229,7 +229,12 @@ impl<A: OrigDstAddr> Config<A> {
                 .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
                 .into_new_service()
                 .cache(
-                    svc::layers().push_on_response(svc::layers().box_http_request().push_lock().push(metrics.stack.layer(stack_labels("forward.endpoint"))))
+                    svc::layers().push_on_response(
+                        svc::layers()
+                            .box_http_request()
+                            .push_lock()
+                            .push(metrics.stack.layer(stack_labels("forward.endpoint"))),
+                    )
                 )
                 .instrument(|endpoint: &Target<HttpEndpoint>| {
                     info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
@@ -493,8 +498,11 @@ impl From<Error> for DiscoveryError {
 fn is_discovery_rejected(err: &Error) -> bool {
     tracing::trace!(?err, "is_discovery_rejected");
 
-    if let Some(lock) = err.downcast_ref::<svc::lock::error::ServiceError>() {
-        return is_discovery_rejected(lock.inner());
+    if let Some(e) = err.downcast_ref::<svc::buffer::error::ServiceError>() {
+        return is_discovery_rejected(e.inner());
+    }
+    if let Some(e) = err.downcast_ref::<svc::lock::error::ServiceError>() {
+        return is_discovery_rejected(e.inner());
     }
 
     err.is::<DiscoveryRejected>() || err.is::<profiles::InvalidProfileAddr>()

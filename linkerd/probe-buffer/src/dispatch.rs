@@ -1,4 +1,4 @@
-use crate::error::Failed;
+use crate::error::ServiceError;
 use crate::InFlight;
 use futures::{Async, Future, Poll, Stream};
 use linkerd2_error::{Error, Never};
@@ -47,44 +47,32 @@ where
     type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // Clear any existing probes, since we're about to poll the inner
+        // service's readiness again.
+        self.probe = None;
+
         loop {
-            let needs_ready = match self.probe.as_mut() {
-                None => true,
-                // If the probe was set, then the inner service is already ready and
-                // only needs to be polled again once the probe timeout fires.
-                Some(probe) => match probe.poll() {
-                    Ok(Async::NotReady) => false,
-                    _ => {
-                        self.probe = None;
-                        true
+            match self.inner.poll_ready() {
+                // If it's not ready, wait for it..
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+
+                // If the service fails, propagate the failure to all pending
+                // requests and then complete.
+                Err(error) => {
+                    let shared = ServiceError(Arc::new(error.into()));
+                    while let Ok(Async::Ready(Some(InFlight { tx, .. }))) = self.rx.poll() {
+                        let _ = tx.send(Err(shared.clone().into()));
                     }
-                },
-            };
-
-            if needs_ready {
-                debug_assert!(self.probe.is_none());
-                match self.inner.poll_ready() {
-                    // If it's not ready, wait for it..
-                    Ok(Async::NotReady) => return Ok(Async::NotReady),
-
-                    // If the service fails, propagate the failure to all pending
-                    // requests and then complete.
-                    Err(error) => {
-                        let shared = Failed(Arc::new(error.into()));
-                        while let Ok(Async::Ready(Some(InFlight { tx, .. }))) = self.rx.poll() {
-                            let _ = tx.send(Err(shared.clone().into()));
-                        }
-                        return Ok(Async::Ready(()));
-                    }
-
-                    // If inner service can receive requests, start polling the channel.
-                    Ok(Async::Ready(())) => {}
+                    return Ok(Async::Ready(()));
                 }
+
+                // If inner service can receive requests, start polling the channel.
+                Ok(Async::Ready(())) => {}
             }
 
             // The inner service is ready, so poll for new requests.
             match self.rx.poll() {
-                // The sender has been dropped, complete.
+                // The sender has been dropped, complete (notifying in-flight requests).
                 Err(_) | Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
 
                 // If a request was ready, spawn its response future
