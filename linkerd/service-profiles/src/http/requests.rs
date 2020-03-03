@@ -55,11 +55,12 @@ where
     fn proxy(&self, inner: &mut S, req: http::Request<B>) -> Self::Future {
         for (ref condition, ref route) in &self.routes {
             if condition.is_match(&req) {
-                trace!(?condition, "using configured route");
+                trace!(?condition, "Using configured route");
                 return route.proxy(inner, req);
             }
         }
 
+        trace!("Using default route");
         self.default.proxy(inner, req)
     }
 }

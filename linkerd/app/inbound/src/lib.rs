@@ -143,7 +143,10 @@ impl<A: OrigDstAddr> Config<A> {
 
             let http_profile_route_proxy = svc::proxies()
                 // Sets the route as a request extension so that it can be used
-                // by tap}
+                // by tap.
+                .push_http_insert_target()
+                // Records per-route metrics.
+                .push(metrics.http_route.into_layer::<classify::Response>())
                 // Sets the per-route response classifier as a request
                 // extension.
                 .push(classify::Layer::new())
