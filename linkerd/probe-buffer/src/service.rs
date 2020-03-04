@@ -3,7 +3,6 @@ use crate::InFlight;
 use futures::{try_ready, Async, Future, Poll};
 use linkerd2_error::Error;
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::trace;
 
 pub struct ProbeBuffer<Req, Rsp> {
     /// Updates with the readiness state of the inner service. This allows the buffer to reliably

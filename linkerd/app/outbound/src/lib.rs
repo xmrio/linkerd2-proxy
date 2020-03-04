@@ -307,6 +307,15 @@ impl<A: OrigDstAddr> Config<A> {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
+                            // TODO: use self-evicting buffer
+                            // // If the service has been ready & unused for `cache_max_idle_age`,
+                            // // fail it.
+                            // .push_idle_timeout(cache_max_idle_age)
+                            // // If the service has been unavailable for an extend time, eagerly
+                            // // fail requests.
+                            // .push_failfast(Duration::from_secs(10))
+                            // // Shares the service, ensuring discovery errors are propagated.
+                            // .push_spawn_buffer(10, Duration::from_secs(1))
                             .push_lock()
                             .push(metrics.stack.layer(stack_labels("profile"))),
                     ),
@@ -325,7 +334,14 @@ impl<A: OrigDstAddr> Config<A> {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
-                            .push_lock()
+                            // If the service has been ready & unused for `cache_max_idle_age`,
+                            // fail it.
+                            .push_idle_timeout(cache_max_idle_age)
+                            // If the service has been unavailable for an extend time, eagerly
+                            // fail requests.
+                            .push_failfast(Duration::from_secs(10))
+                            // Shares the service, ensuring discovery errors are propagated.
+                            .push_spawn_buffer(10, Duration::from_secs(1))
                             .push(metrics.stack.layer(stack_labels("canonicalize"))),
                     ),
                 )

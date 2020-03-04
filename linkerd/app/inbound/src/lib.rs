@@ -31,6 +31,7 @@ use linkerd2_app_core::{
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, info_span};
 
@@ -78,7 +79,7 @@ impl<A: OrigDstAddr> Config<A> {
                     server: ServerConfig { bind, h2_settings },
                     connect,
                     cache_capacity: _,
-                    cache_max_idle_age: _,
+                    cache_max_idle_age,
                     disable_protocol_detection_for_ports,
                     dispatch_timeout,
                     max_in_flight_requests,
@@ -118,7 +119,14 @@ impl<A: OrigDstAddr> Config<A> {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
-                            .push_lock()
+                            // If the service has been ready & unused for `cache_max_idle_age`,
+                            // fail it.
+                            .push_idle_timeout(cache_max_idle_age)
+                            // If the service has been unavailable for an extend time, eagerly
+                            // fail requests.
+                            .push_failfast(Duration::from_secs(10))
+                            // Shares the service, ensuring discovery errors are propagated.
+                            .push_spawn_buffer(10, Duration::from_secs(1))
                             .push(metrics.stack.layer(stack_labels("endpoint"))),
                     ),
                 )
@@ -163,7 +171,14 @@ impl<A: OrigDstAddr> Config<A> {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
-                            .push_lock()
+                            // If the service has been ready & unused for `cache_max_idle_age`,
+                            // fail it.
+                            .push_idle_timeout(cache_max_idle_age)
+                            // If the service has been unavailable for an extend time, eagerly
+                            // fail requests.
+                            .push_failfast(Duration::from_secs(10))
+                            // Shares the service, ensuring discovery errors are propagated.
+                            .push_spawn_buffer(10, Duration::from_secs(1))
                             .push(metrics.stack.layer(stack_labels("target"))),
                     ),
                 )
@@ -187,6 +202,15 @@ impl<A: OrigDstAddr> Config<A> {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
+                            // TODO: self-evicting buffers
+                            // // If the service has been ready & unused for `cache_max_idle_age`,
+                            // // fail it.
+                            // .push_idle_timeout(cache_max_idle_age)
+                            // // If the service has been unavailable for an extend time, eagerly
+                            // // fail requests.
+                            // .push_failfast(Duration::from_secs(10))
+                            // // Shares the service, ensuring discovery errors are propagated.
+                            // .push_spawn_buffer(10, Duration::from_secs(1))
                             .push_lock()
                             .push(metrics.stack.layer(stack_labels("profile"))),
                     ),

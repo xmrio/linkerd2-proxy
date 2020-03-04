@@ -99,9 +99,9 @@ where
 
                     // Drop the inner Service but keep the task alive until all consumers have
                     // dropped.
-                    self.inner = None;
-
+                    //
                     // This is safe because ready.poll_close has returned NotReady.
+                    self.inner = None;
                     return Ok(Async::NotReady);
                 }
 
