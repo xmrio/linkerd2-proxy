@@ -1,8 +1,8 @@
 use crate::{Dispatch, ProbeBuffer};
-use futures::Future;
+use futures::{Async, Future};
 use linkerd2_error::Error;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing_futures::Instrument;
 
 pub struct SpawnProbeBufferLayer<Req> {
@@ -43,11 +43,12 @@ where
 
     fn layer(&self, inner: S) -> Self::Service {
         let (tx, rx) = mpsc::channel(self.capacity);
+        let (ready_tx, ready_rx) = watch::channel(Ok(Async::NotReady));
         tokio::spawn(
-            Dispatch::new(inner, rx, self.probe_timeout)
+            Dispatch::new(inner, rx, ready_tx, self.probe_timeout)
                 .in_current_span()
                 .map_err(|n| match n {}),
         );
-        ProbeBuffer::new(tx)
+        ProbeBuffer::new(tx, ready_rx)
     }
 }
