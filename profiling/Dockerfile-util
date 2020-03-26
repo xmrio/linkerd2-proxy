@@ -1,0 +1,11 @@
+FROM ubuntu:latest
+RUN apt-get update && \
+    apt-get install -y iperf && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/
+
+COPY --from=olix0r/linkerd-await:v0.1.1 /linkerd-await /usr/bin/linkerd-await
+COPY --from=fortio/fortio /usr/bin/fortio /usr/bin/fortio
+COPY --from=fortio/fortio /usr/share/fortio /usr/share/fortio
+
+ENV PATH="/usr/bin/:${PATH}"
+
