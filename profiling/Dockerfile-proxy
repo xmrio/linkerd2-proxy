@@ -6,16 +6,17 @@ FROM $RUST_IMAGE as build
 WORKDIR /usr/src/linkerd2-proxy
 COPY . .
 RUN cargo fetch --locked
-RUN RUSTFLAGS=$RUSTFLAGS cargo build \
-    --frozen --release \
-    -p linkerd2-app-profiling \
-    --bin profile
+RUN cd linkerd2-proxy && \
+    RUSTFLAGS=$RUSTFLAGS cargo build --frozen --release --features=mock-orig-dst
+
 
 ## Install the proxy binary into the base runtime image.
 FROM $RUNTIME_IMAGE as runtime
 RUN apt-get update && \
     apt-get install -y linux-base netcat curl iproute2 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/ && \
-COPY --from=build /usr/src/linkerd2-proxy/target/release/profile /usr/bin/linkerd2-proxy-profiler
-ENV PATH="/usr/bin/:${PATH}"
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/
+COPY --from=build /usr/src/linkerd2-proxy/target/release/linkerd2-proxy /usr/bin/linkerd2-proxy
+ENV LINKERD2_PROXY_LOG=linkerd=info,warn
+ENV LINKERD2_PROXY_IDENTITY_DISABLED=1
+ENV LINKERD2_PROXY_TAP_DISABLED=1
 ENTRYPOINT ["/usr/bin/linkerd2-proxy"]

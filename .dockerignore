@@ -9,3 +9,4 @@ Dockerfile*
 **/target
 target
 .cargo
+profiling
