@@ -1,8 +1,15 @@
 #![deny(warnings, rust_2018_idioms)]
-
-use futures::{try_ready, Future, Poll};
+use futures::Poll;
+use futures_03::{
+    compat::{Compat, Compat01As03, Future01CompatExt},
+    TryFuture, TryFutureExt,
+};
 use linkerd2_error::Error;
 use linkerd2_stack::NewService;
+use pin_project::{pin_project, project};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
 use tower::util::{Oneshot, ServiceExt};
 use tracing::trace;
 
@@ -75,12 +82,15 @@ where
     K::Key: std::fmt::Debug,
     M: tower::Service<K::Key, Response = S>,
     M::Error: Into<Error>,
+    Compat<M::Future>: Future<Output = Result<M::Response, M::Error>> + Unpin,
     S: tower::Service<U>,
     S::Error: Into<Error>,
+    // S::Response: Send + 'static,
 {
     type Response = S::Response;
+
     type Error = Error;
-    type Future = ResponseFuture<U, M::Future, S>;
+    type Future = Compat<ResponseFuture<U, Compat01As03<M::Future>, S>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         self.make.poll_ready().map_err(Into::into)
@@ -89,45 +99,66 @@ where
     fn call(&mut self, request: U) -> Self::Future {
         let key = self.recognize.recognize(&request);
         trace!(?key, ?request, "Routing");
-        ResponseFuture::Make(self.make.call(key), Some(request))
+        ResponseFuture {
+            state: State::Make(self.make.call(key).compat(), Some(request)),
+        }
+        .compat()
     }
 }
 
-pub enum ResponseFuture<Req, M, S>
+#[pin_project]
+pub struct ResponseFuture<Req, M, S>
 where
-    M: Future<Item = S>,
+    M: TryFuture<Ok = S> + Unpin,
+    M::Error: Into<Error>,
+    S: tower::Service<Req> + Unpin,
+    S::Error: Into<Error>,
+    Req: Unpin,
+{
+    #[pin]
+    state: State<Req, M, S>,
+}
+
+#[pin_project]
+enum State<Req, M, S>
+where
+    M: TryFuture<Ok = S>,
     M::Error: Into<Error>,
     S: tower::Service<Req>,
     S::Error: Into<Error>,
 {
-    Make(M, Option<Req>),
-    Respond(Oneshot<S, Req>),
+    Make(#[pin] M, Option<Req>),
+    Respond(#[pin] Compat01As03<Oneshot<S, Req>>),
 }
 
 impl<Req, M, S> Future for ResponseFuture<Req, M, S>
 where
-    M: Future<Item = S>,
+    M: TryFuture<Ok = S>,
     M::Error: Into<Error>,
     S: tower::Service<Req>,
     S::Error: Into<Error>,
 {
-    type Item = S::Response;
-    type Error = Error;
+    type Output = Result<S::Response, Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    #[project] // Necessary to support the `project` attribute on match exprs on stable.
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> std::task::Poll<Self::Output> {
+        #[project]
+        let mut this = self.project();
         loop {
-            *self = match self {
-                ResponseFuture::Make(ref mut fut, ref mut req) => {
+            #[project]
+            match this.state.as_mut().project() {
+                State::Make(fut, req) => {
                     trace!("Making");
-                    let service = try_ready!(fut.poll().map_err(Into::into));
+                    let service = futures_03::ready!(fut.try_poll(cx).map_err(Into::into)?);
                     let req = req.take().expect("polled after ready");
-                    ResponseFuture::Respond(service.oneshot(req))
+                    this.state
+                        .set(State::Respond(service.oneshot(req).compat()));
                 }
-                ResponseFuture::Respond(ref mut future) => {
+                State::Respond(future) => {
                     trace!("Responding");
-                    return future.poll().map_err(Into::into);
+                    return future.poll(cx).map_err(Into::into);
                 }
-            }
+            };
         }
     }
 }

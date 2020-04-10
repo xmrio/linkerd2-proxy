@@ -7,11 +7,13 @@ publish = false
 
 [dependencies]
 futures = "0.1"
+futures_03 = { package = "futures", version = "0.3", features = ["compat"] }
 linkerd2-error = { path = "../error" }
 linkerd2-stack = { path = "../stack" }
 tower = "0.1"
 tracing = "0.1.2"
 tracing-futures = "0.1"
+pin-project = "0.4"
 
 [dev-dependencies]
 tokio-compat = "0.1"
