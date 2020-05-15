@@ -1,9 +1,8 @@
 use crate::http::uri::Authority;
 use indexmap::IndexMap;
 use linkerd2_app_core::{
-    // dst,
-    // metric_labels,
-    // metric_labels::{prefix_labels, EndpointLabels},
+    dst, metric_labels,
+    metric_labels::{prefix_labels, EndpointLabels},
     profiles,
     proxy::{
         api_resolve::{Metadata, ProtocolHint},
@@ -15,9 +14,7 @@ use linkerd2_app_core::{
     },
     router,
     transport::{connect, tls},
-    Addr,
-    Conditional,
-    L5D_REQUIRE_ID,
+    Addr, Conditional, L5D_REQUIRE_ID,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -306,21 +303,21 @@ impl http::settings::HasSettings for HttpEndpoint {
 //     }
 // }
 
-// impl Into<EndpointLabels> for Target<HttpEndpoint> {
-//     fn into(self) -> EndpointLabels {
-//         use linkerd2_app_core::metric_labels::{Direction, TlsId};
-//         EndpointLabels {
-//             authority: Some(self.addr.to_http_authority()),
-//             direction: Direction::Out,
-//             tls_id: self
-//                 .inner
-//                 .identity
-//                 .as_ref()
-//                 .map(|id| TlsId::ServerId(id.clone())),
-//             labels: prefix_labels("dst", self.inner.metadata.labels().into_iter()),
-//         }
-//     }
-// }
+impl Into<EndpointLabels> for Target<HttpEndpoint> {
+    fn into(self) -> EndpointLabels {
+        use linkerd2_app_core::metric_labels::{Direction, TlsId};
+        EndpointLabels {
+            authority: Some(self.addr.to_http_authority()),
+            direction: Direction::Out,
+            tls_id: self
+                .inner
+                .identity
+                .as_ref()
+                .map(|id| TlsId::ServerId(id.clone())),
+            labels: prefix_labels("dst", self.inner.metadata.labels().into_iter()),
+        }
+    }
+}
 
 // === impl TcpEndpoint ===
 
@@ -345,17 +342,17 @@ impl tls::HasPeerIdentity for TcpEndpoint {
     }
 }
 
-// impl Into<EndpointLabels> for TcpEndpoint {
-//     fn into(self) -> EndpointLabels {
-//         use linkerd2_app_core::metric_labels::{Direction, TlsId};
-//         EndpointLabels {
-//             direction: Direction::Out,
-//             tls_id: self.identity.as_ref().map(|id| TlsId::ServerId(id.clone())),
-//             authority: None,
-//             labels: None,
-//         }
-//     }
-// }
+impl Into<EndpointLabels> for TcpEndpoint {
+    fn into(self) -> EndpointLabels {
+        use linkerd2_app_core::metric_labels::{Direction, TlsId};
+        EndpointLabels {
+            direction: Direction::Out,
+            tls_id: self.identity.as_ref().map(|id| TlsId::ServerId(id.clone())),
+            authority: None,
+            labels: None,
+        }
+    }
+}
 
 // === impl LogicalPerRequest ===
 
