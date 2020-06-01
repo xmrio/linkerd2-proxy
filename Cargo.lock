@@ -916,7 +916,6 @@ dependencies = [
  "quickcheck",
  "rand 0.7.2",
  "regex 1.0.0",
- "tokio 0.1.22",
  "tokio 0.2.21",
  "tokio-compat",
  "tokio-timer",
@@ -943,7 +942,7 @@ dependencies = [
  "linkerd2-admit",
  "linkerd2-app-core",
  "quickcheck",
- "tokio 0.1.22",
+ "tokio 0.2.21",
  "tower 0.3.1",
  "tower-grpc",
  "tracing",
@@ -1003,7 +1002,7 @@ dependencies = [
  "linkerd2-retry",
  "pin-project",
  "quickcheck",
- "tokio 0.1.22",
+ "tokio 0.2.21",
  "tower 0.3.1",
  "tracing",
 ]
@@ -1260,12 +1259,17 @@ dependencies = [
 name = "linkerd2-opencensus"
 version = "0.1.0"
 dependencies = [
- "futures 0.1.26",
+ "futures 0.3.4",
+ "http 0.2.1",
+ "http-body 0.3.1",
  "linkerd2-error",
  "linkerd2-metrics",
+ "linkerd2-stack",
  "opencensus-proto",
- "tokio 0.1.22",
- "tower-grpc",
+ "pin-project",
+ "tokio 0.2.21",
+ "tonic",
+ "tower 0.3.1",
  "tracing",
 ]
 
@@ -1323,6 +1327,8 @@ dependencies = [
  "http 0.2.1",
  "prost 0.6.1",
  "prost-types 0.6.1",
+ "quickcheck",
+ "rand 0.7.2",
  "tonic",
  "tonic-build",
 ]
@@ -1576,23 +1582,25 @@ dependencies = [
 name = "linkerd2-service-profiles"
 version = "0.1.0"
 dependencies = [
- "bytes 0.4.11",
- "futures 0.1.26",
+ "bytes 0.5.4",
+ "futures 0.3.4",
  "http 0.2.1",
+ "http-body 0.3.1",
  "indexmap",
  "linkerd2-addr",
  "linkerd2-dns",
  "linkerd2-error",
- "linkerd2-proxy-api 0.1.12 (git+https://github.com/linkerd/linkerd2-proxy-api?tag=v0.1.12)",
+ "linkerd2-proxy-api 0.1.12 (git+https://github.com/linkerd/linkerd2-proxy-api?rev=c2dba642c7301b5b562c75fd6e2bd0a12ec763e8)",
  "linkerd2-stack",
  "linkerd2-test-util",
- "prost-types 0.5.0",
+ "pin-project",
+ "prost-types 0.6.1",
  "quickcheck",
  "rand 0.7.2",
  "regex 1.0.0",
- "tokio 0.1.22",
+ "tokio 0.2.21",
+ "tonic",
  "tower 0.3.1",
- "tower-grpc",
  "tracing",
  "tracing-futures 0.1.0",
 ]
@@ -1669,13 +1677,15 @@ name = "linkerd2-trace-context"
 version = "0.1.0"
 dependencies = [
  "base64 0.10.1",
- "bytes 0.4.11",
- "futures 0.1.26",
+ "bytes 0.5.4",
+ "futures 0.3.4",
  "hex",
- "http 0.1.21",
+ "http 0.2.1",
  "linkerd2-error",
+ "pin-project",
  "rand 0.7.2",
- "tower 0.1.1",
+ "tokio 0.2.21",
+ "tower 0.3.1",
  "tracing",
 ]
 
@@ -1897,12 +1907,12 @@ dependencies = [
 name = "opencensus-proto"
 version = "0.1.0"
 dependencies = [
- "bytes 0.4.11",
- "futures 0.1.26",
- "prost 0.5.0",
- "prost-types 0.5.0",
- "tower-grpc",
- "tower-grpc-build",
+ "bytes 0.5.4",
+ "futures 0.3.4",
+ "prost 0.6.1",
+ "prost-types 0.6.1",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
