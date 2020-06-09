@@ -10,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::ops::{Bound, DerefMut, RangeBounds};
 use std::sync::{Arc, Mutex};
+use tracing_futures::{Instrument, Instrumented};
 
 pub fn new() -> Controller {
     Controller::new()
@@ -182,8 +183,14 @@ impl Stream01 for DstReceiver {
     type Error = grpc::Status;
     fn poll(&mut self) -> Poll01<Option<Self::Item>, Self::Error> {
         match futures_01::try_ready!(self.0.poll().map_err(|_| grpc_internal_code())) {
-            Some(res) => Ok(Async::Ready(Some(res?))),
-            None => Ok(Async::Ready(None)),
+            Some(res) => {
+                tracing::info!(?res);
+                Ok(Async::Ready(Some(res?)))
+            }
+            None => {
+                tracing::info!("no more destinations!");
+                Ok(Async::Ready(None))
+            }
         }
     }
 }
@@ -234,10 +241,13 @@ impl ProfileSender {
 }
 
 impl pb::server::Destination for Controller {
-    type GetStream = DstReceiver;
+    type GetStream = Instrumented<DstReceiver>;
     type GetFuture = future::FutureResult<grpc::Response<Self::GetStream>, grpc::Status>;
 
     fn get(&mut self, req: grpc::Request<pb::GetDestination>) -> Self::GetFuture {
+        let span = tracing::info_span!("get_destination", dst = ?req.get_ref());
+        let _e = span.enter();
+
         if let Ok(mut calls) = self.expect_dst_calls.lock() {
             if self.unordered {
                 let mut calls_next: VecDeque<Dst> = VecDeque::new();
@@ -250,7 +260,11 @@ impl pb::server::Destination for Controller {
                             tracing::info!("found request={:?}", dst);
                             calls_next.extend(calls.drain(..));
                             *calls.deref_mut() = calls_next;
-                            return future::result(updates.map(grpc::Response::new));
+                            return future::result(
+                                updates
+                                    .map(Instrument::in_current_span)
+                                    .map(grpc::Response::new),
+                            );
                         }
 
                         calls_next.push_back(Dst::Call(dst, updates));
@@ -266,7 +280,11 @@ impl pb::server::Destination for Controller {
                 Some(Dst::Call(dst, updates)) => {
                     if &dst == req.get_ref() {
                         tracing::debug!("found request={:?}", dst);
-                        return future::result(updates.map(grpc::Response::new));
+                        return future::result(
+                            updates
+                                .map(Instrument::in_current_span)
+                                .map(grpc::Response::new),
+                        );
                     }
 
                     let msg = format!(
@@ -283,18 +301,22 @@ impl pb::server::Destination for Controller {
             }
         }
 
+        tracing::info!("no results");
         future::err(grpc_no_results())
     }
 
-    type GetProfileStream = ProfileReceiver;
+    type GetProfileStream = Instrumented<ProfileReceiver>;
     type GetProfileFuture =
         future::FutureResult<grpc::Response<Self::GetProfileStream>, grpc::Status>;
 
     fn get_profile(&mut self, req: grpc::Request<pb::GetDestination>) -> Self::GetProfileFuture {
+        let span = tracing::info_span!("get_profile", dst = ?req.get_ref());
+        let _e = span.enter();
+
         if let Ok(mut calls) = self.expect_profile_calls.lock() {
             if let Some((dst, profile)) = calls.pop_front() {
                 if &dst == req.get_ref() {
-                    return future::ok(grpc::Response::new(profile));
+                    return future::ok(grpc::Response::new(profile.in_current_span()));
                 }
 
                 calls.push_front((dst, profile));
@@ -334,10 +356,15 @@ where
         .name(name.into())
         .spawn(move || {
             tracing::dispatcher::with_default(&trace, move || {
+                let span = tracing::info_span!("test_controller", addr = ?addr);
+                let _enter = span.enter();
+
                 if let Some(delay) = delay {
+                    tracing::debug!("waiting to start...");
                     let _ = listening_tx.take().unwrap().send(());
                     delay.wait().expect("support server delay wait");
                 }
+                tracing::info!("starting!");
                 let mut runtime = runtime::current_thread::Runtime::new().expect("support runtime");
 
                 let listener = listener.listen(1024).expect("Tcp::listen");
@@ -357,6 +384,7 @@ where
                     .serve(move || {
                         let svc = Mutex::new(svc.clone());
                         hyper_012::service::service_fn(move |req| {
+                            tracing::info!(?req);
                             let req = req.map(|body| tower_grpc::BoxBody::map_from(body));
                             svc.lock()
                                 .expect("svc lock")
