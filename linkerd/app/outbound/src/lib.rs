@@ -204,14 +204,16 @@ impl Config {
                 .cache(
                     svc::layers().push_on_response(
                         svc::layers()
-                            // // If the balancer has been ready & unused for `cache_max_idle_age`,
-                            // // fail the balancer.
-                            // .push_idle_timeout(cache_max_idle_age)
                             // If the balancer has been empty/unavailable for 10s, eagerly fail
                             // requests.
                             .push_failfast(dispatch_timeout)
                             // Shares the balancer, ensuring discovery errors are propagated.
-                            .push_spawn_buffer(buffer_capacity)
+                            .push_spawn_buffer_with_idle_timeout(
+                                buffer_capacity,
+                                // If the balancer has been ready & unused for `cache_max_idle_age`,
+                                // fail the balancer.
+                                cache_max_idle_age,
+                            )
                             .push(metrics.stack.layer(stack_labels("balance"))),
                     ),
                 )
