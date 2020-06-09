@@ -515,9 +515,7 @@ impl From<Error> for DiscoveryError {
             return inner.clone();
         }
 
-        if orig.is::<DiscoveryRejected>()
-        //  || orig.is::<profiles::InvalidProfileAddr>()
-        {
+        if orig.is::<DiscoveryRejected>() || orig.is::<profiles::InvalidProfileAddr>() {
             return DiscoveryError::DiscoveryRejected;
         }
 
