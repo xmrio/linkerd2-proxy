@@ -598,8 +598,8 @@ mod http2 {
     #[cfg_attr(not(feature = "nyi"), ignore)]
     async fn outbound_balancer_waits_for_ready_endpoint() {
         // See https://github.com/linkerd/linkerd2/issues/2550
-        let _ = trace_init();
-
+        let (dispatch, _) = trace_init();
+        let _guard = tracing::dispatcher::set_default(&dispatch);
         let srv1 = server::http2()
             .route("/", "hello")
             .route("/bye", "bye")
@@ -622,16 +622,21 @@ mod http2 {
         let metrics = client::http1(proxy.metrics, "localhost");
 
         assert_eq!(client.get_async("/").await, "hello");
+        tracing::info!("------- req 1 completed -------");
 
         // Simulate the first server falling over without discovery
         // knowing about it...
         drop(srv1);
+        tracing::info!("------- dropped srv1 -------");
 
         // Wait until the proxy has seen the `srv1` disconnect...
-        assert_eventually_contains!(
-            metrics.get_async("/metrics").await,
-            "tcp_close_total{direction=\"outbound\",peer=\"dst\",tls=\"no_identity\",no_tls_reason=\"not_provided_by_service_discovery\",errno=\"\"} 1"
-        );
+        while !metrics.get_async("/metrics").await.contains(
+            "tcp_close_total{direction=\"outbound\",peer=\"dst\",tls=\"no_identity\",no_tls_reason=\"not_provided_by_service_discovery\",errno=\"\"} 1") {
+                tokio::time::delay_for(std::time::Duration::from_millis(1)).await;
+            }
+
+        println!("\n\nOK WE GOT HERE NOW\n\n");
+        tracing::info!("------- disconnected ------- ");
 
         // Start a new request to the destination, now that the server is dead.
         // This request should be waiting at the balancer for a ready endpoint.
@@ -642,7 +647,12 @@ mod http2 {
         // When we tell the balancer about a new endpoint, it should have added
         // it and then dispatched the request...
         dst.send_addr(srv2.addr);
+        tracing::info!("sent addr update");
 
+        println!("\n\nSLEEPING\n\n");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        println!("\n\nDID SLEEP\n\n");
         let res = fut.await.expect("/bye response");
         assert_eq!(res.status(), http::StatusCode::OK);
     }

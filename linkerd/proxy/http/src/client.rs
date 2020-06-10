@@ -215,8 +215,9 @@ where
     type Future = ClientFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        tracing::debug!("poll_client");
         match *self {
-            Client::Http1(_) => Poll::Ready(Ok(())),
+            Client::Http1(ref mut h1) => h1.poll_ready(cx).map_err(Into::into),
             Client::Http2(ref mut h2) => h2.poll_ready(cx).map_err(Into::into),
         }
     }

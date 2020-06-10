@@ -130,7 +130,11 @@ where
                     // Only reuse the backoff if the backoff stream did not complete.
                     let backoff = match more {
                         Some(Ok(())) => backoff.take(),
-                        Some(Err(e)) => return Poll::Ready(Err(e.into())),
+                        Some(Err(e)) => {
+                            let e = e.into();
+                            tracing::info!(error = ?e, "WAIT IS THIS WRONG\n\n");
+                            return Poll::Ready(Err(e));
+                        }
                         None => None,
                     };
 

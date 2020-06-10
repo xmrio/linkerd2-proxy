@@ -115,6 +115,7 @@ impl Client {
     }
 
     pub async fn get_async(&self, path: &str) -> String {
+        println!("\n\n IM DOING A SCRAPEY\n\n");
         let req = self.request_builder(path);
         let res = self
             .request_async(req.method("GET"))
@@ -181,11 +182,15 @@ impl Client {
                     .parse()
                     .unwrap();
             };
+        };
+        let my_tx = self.tx.clone();
+        async move {
+            tracing::debug!(headers = ?req.headers(), "request");
+            let (tx, rx) = oneshot::channel();
+            let _ = my_tx.send((req, tx));
+            rx.await.expect("request cancelled")
         }
-        tracing::debug!(headers = ?req.headers(), "request");
-        let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send((req, tx));
-        async { rx.await.expect("request cancelled") }.in_current_span()
+        .in_current_span()
     }
 
     pub fn wait_for_closed(self) {

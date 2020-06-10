@@ -42,7 +42,7 @@ pub fn with_filter(filter: impl AsRef<str>) -> (Dispatch, LevelHandle) {
         .with_timer(Uptime { start_time })
         .with_env_filter(filter)
         .with_filter_reloading()
-        .with_ansi(cfg!(test));
+        .with_ansi(true);
     let handle = LevelHandle {
         inner: builder.reload_handle(),
     };

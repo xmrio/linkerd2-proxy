@@ -1,6 +1,6 @@
 use super::trace;
 use super::Body;
-use futures::{ready, TryFuture, TryFutureExt};
+use futures::{ready, FutureExt, TryFuture};
 use http;
 use hyper::{
     body::HttpBody,
@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug, info_span};
+use tracing::info_span;
 use tracing_futures::Instrument;
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -32,6 +32,7 @@ pub struct Connect<C, B> {
 #[derive(Debug)]
 pub struct Connection<B> {
     tx: SendRequest<B>,
+    jh: tokio::task::JoinHandle<Result<(), hyper::Error>>,
 }
 
 #[pin_project]
@@ -166,11 +167,9 @@ where
                 ConnectState::Handshake(hs) => {
                     let (tx, conn) = ready!(hs.poll(cx))?;
 
-                    tokio::spawn(
-                        conn.map_err(|error| debug!(%error, "failed").instrument(info_span!("h2"))),
-                    );
+                    let jh = tokio::spawn(conn);
 
-                    return Poll::Ready(Ok(Connection { tx }));
+                    return Poll::Ready(Ok(Connection { tx, jh }));
                 }
             };
         }
@@ -190,7 +189,27 @@ where
     type Future = ResponseFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.tx.poll_ready(cx).map_err(From::from)
+        match self.jh.poll_unpin(cx) {
+            Poll::Pending => {
+                tracing::debug!("join handle still alive");
+            }
+            Poll::Ready(Ok(res)) => {
+                tracing::debug!("join handle dead");
+                return Poll::Ready(res);
+            }
+            Poll::Ready(Err(err)) => {
+                if err.is_panic() {
+                    tracing::error!("background task panicked!");
+                    std::panic::resume_unwind(err.into_panic());
+                } else {
+                    unreachable!("background task will not be cancelled");
+                }
+            }
+        };
+        tracing::debug!("poll_ready h2 client");
+        let ready = self.tx.poll_ready(cx).map_err(From::from);
+        tracing::debug!(?ready, "poll_ready h2 client");
+        ready
     }
 
     fn call(&mut self, mut req: http::Request<B>) -> Self::Future {
@@ -209,7 +228,7 @@ where
         }
 
         ResponseFuture {
-            inner: self.tx.send_request(req),
+            inner: self.tx.call(req),
         }
     }
 }

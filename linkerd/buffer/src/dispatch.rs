@@ -1,6 +1,6 @@
 use crate::error::{IdleError, ServiceError};
 use crate::InFlight;
-use futures::{future::FutureExt, select_biased};
+use futures::{future::FutureExt, select_biased, stream::Stream};
 use linkerd2_error::Error;
 use std::sync::Arc;
 use std::task::Poll;
