@@ -8,7 +8,7 @@ use linkerd2_app::{trace, Config};
 use linkerd2_signal as signal;
 pub use tracing::{debug, error, info, warn};
 
-#[tokio::main(basic_scheduler)]
+#[tokio::main]
 async fn main() {
     let trace = trace::init();
 
