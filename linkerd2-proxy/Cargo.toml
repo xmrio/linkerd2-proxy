@@ -8,6 +8,7 @@ description = "The main proxy executable"
 
 [features]
 mock-orig-dst  = ["linkerd2-app/mock-orig-dst"]
+multicore  = ["tokio/rt-threaded"]
 
 [dependencies]
 futures = { version = "0.3", features = ["compat"] }
