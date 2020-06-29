@@ -1,5 +1,5 @@
 #![deny(warnings, rust_2018_idioms)]
-#![type_length_limit = "1586225"]
+#![recursion_limit = "256"]
 mod client;
 mod http;
 

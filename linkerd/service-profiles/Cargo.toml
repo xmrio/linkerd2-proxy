@@ -9,6 +9,7 @@ Implements client layers for Linkerd ServiceProfiles.
 """
 
 [dependencies]
+async-stream = "0.2.1"
 bytes = "0.5"
 futures = "0.3"
 http = "0.2"

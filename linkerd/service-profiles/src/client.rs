@@ -10,7 +10,6 @@ use linkerd2_error::{Error, Recover};
 use linkerd2_proxy_api::destination as api;
 use regex::Regex;
 use std::convert::TryInto;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -20,8 +19,8 @@ use tonic::{
     client::GrpcService,
 };
 use tower::retry::budget::Budget;
-use tracing::{debug, error, info, info_span, trace, warn};
-use tracing_futures::Instrument;
+use tracing::{debug, info, warn};
+//use tracing_futures::Instrument;
 
 #[derive(Clone, Debug)]
 pub struct Client<S, R> {
@@ -80,34 +79,42 @@ where
     S::Future: Send,
     R: Recover + Send + Clone + 'static,
     R::Backoff: Unpin + Send,
+    R::Error: Send,
 {
-    pub async fn routes(&mut self, dst: Addr) -> Result<Receiver, Error> {
+    pub async fn routes(&self, dst: Addr) -> Result<Receiver, Error> {
+        // Fail if the destination is invalid.
         let dst = match dst {
-            Addr::Name(n) => n,
             Addr::Socket(_) => {
+                // TODO support IP addresses.
                 return Err(InvalidProfileAddr(dst.clone()).into());
+            }
+            Addr::Name(dst) => {
+                if !self.suffixes.iter().any(|s| s.contains(dst.name())) {
+                    debug!("name not in profile suffixes");
+                    return Err(InvalidProfileAddr(dst.into()).into());
+                }
+                dst
             }
         };
 
-        if !self.suffixes.iter().any(|s| s.contains(dst.name())) {
-            debug!("name not in profile suffixes");
-            self.service = self.service.clone();
-            return Err(InvalidProfileAddr(dst.clone().into()).into());
+        tokio::pin! {
+            let profiles = profile_stream(
+                self.service.clone(),
+                self.recover.clone(),
+                api::GetDestination {
+                    path: dst.to_string(),
+                    context_token: self.context_token.clone(),
+                    ..Default::default()
+                },
+            );
         }
 
-        let profiles = get_profiles(
-            self.service.clone(),
-            self.recover.clone(),
-            api::GetDestination {
-                path: dst.to_string(),
-                context_token: self.context_token.clone(),
-                ..Default::default()
-            },
-        );
 
-        let (tx, rx) = {
+        let (mut tx, rx) = {
             let profile = tokio::select! {
-                res = (&mut profiles).next() => { res? }
+                res = profiles.next() => {
+                    res.expect("must not terminate")?
+                }
                 () = time::delay_for(self.initial_timeout) => {
                     info!("Using default service profile after timeout");
                     profiles::Routes::default()
@@ -123,12 +130,12 @@ where
                     () = tx.closed() => { return; }
                     p = profiles.next() => {
                         match p {
-                            None => { return; }
-                            Some(p) => {
+                            Some(Ok(p)) => {
                                 if tx.broadcast(p).is_err() {
                                     return;
                                 }
                             }
+                            Some(Err(_)) | None => { return; }
                         }
                     }
                 };
@@ -139,8 +146,9 @@ where
     }
 }
 
-fn get_profiles<S, R>(
-    service: DestinationClient<S>,
+/// Streams profile updates, reconnecting as needed.
+fn profile_stream<S, R>(
+    mut service: DestinationClient<S>,
     recover: R,
     request: api::GetDestination,
 ) -> impl Stream<Item = Result<profiles::Routes, Error>>
@@ -150,33 +158,67 @@ where
     <S::ResponseBody as Body>::Data: Send + 'static,
     <S::ResponseBody as HttpBody>::Error: Into<Error> + Send,
     S::Future: Send,
-    R: Recover,
+    R: Recover + Clone + Send + 'static,
     R::Backoff: Unpin,
 {
     try_stream! {
-        let mut backoff: Option<R::Backoff> = None;
+        let mut res =
+            service
+                .get_profile(request.clone())
+                .await;
 
         loop {
-            if let Some(b) = backoff.as_mut() {
-                b.next().await;
-            }
-
-            match service
-                .get_profile(self.request.clone())
-                .await
-            {
+            match res {
                 Ok(rsp) => {
-                    let updates = rsp.into_inner();
-                    while let Some(up) = updates.next().await {
-                        yield up?;
+                    let mut updates = rsp.into_inner();
+                    while let Some(p) = updates.try_next().await? {
+                        let profile = convert_profile(p);
+                        debug!(?profile, "Profile update");
+                        yield profile;
                     }
                 }
                 Err(e) => {
-                    let b = recover.recover(e)?;
-                    backoff = backoff.unwrap_or(b);
+                    let r = recover.clone();
+                    let backoff = r.recover(e.into())?;
+                    if backoff.try_next().await?.is_none() {
+                        return;
+                    };
+                    
                 },
             }
         }
+    }
+}
+
+impl InvalidProfileAddr {
+    pub fn addr(&self) -> &Addr {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for InvalidProfileAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid profile addr: {}", self.0)
+    }
+}
+
+impl std::error::Error for InvalidProfileAddr {}
+
+fn convert_profile(proto: api::DestinationProfile) -> profiles::Routes {
+    let retry_budget = proto.retry_budget.and_then(convert_retry_budget);
+    let routes = proto
+        .routes
+        .into_iter()
+        .filter_map(move |orig| convert_route(orig, retry_budget.as_ref()))
+        .collect();
+    let dst_overrides = proto
+        .dst_overrides
+        .into_iter()
+        .filter_map(convert_dst_override)
+        .collect();
+    profiles::Routes {
+        routes,
+        dst_overrides,
     }
 }
 
@@ -378,17 +420,3 @@ mod tests {
         }
     }
 }
-
-impl InvalidProfileAddr {
-    pub fn addr(&self) -> &Addr {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for InvalidProfileAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid profile addr: {}", self.0)
-    }
-}
-
-impl std::error::Error for InvalidProfileAddr {}
