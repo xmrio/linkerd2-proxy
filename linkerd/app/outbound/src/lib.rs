@@ -307,17 +307,16 @@ impl Config {
             .check_make_service::<Target<HttpEndpoint>, http::Request<http::boxed::Payload>>()
             .into_new_service()
             .cache(
-                svc::layers()
-                    .push_on_response(
-                        svc::layers()
-                            // If the endpoint has been unavailable for an extended time, eagerly
-                            // fail requests.
-                            .push_failfast(dispatch_timeout)
-                            // Shares the balancer, ensuring discovery errors are propagated.
-                            .push_spawn_buffer_with_idle_timeout(buffer_capacity, cache_max_idle_age)
-                            .box_http_request()
-                            .push(metrics.stack.layer(stack_labels("forward.endpoint"))),
-                    ),
+                svc::layers().push_on_response(
+                    svc::layers()
+                        // If the endpoint has been unavailable for an extended time, eagerly
+                        // fail requests.
+                        .push_failfast(dispatch_timeout)
+                        // Shares the balancer, ensuring discovery errors are propagated.
+                        .push_spawn_buffer_with_idle_timeout(buffer_capacity, cache_max_idle_age)
+                        .box_http_request()
+                        .push(metrics.stack.layer(stack_labels("forward.endpoint"))),
+                ),
             )
             .instrument(|endpoint: &Target<HttpEndpoint>| {
                 info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
