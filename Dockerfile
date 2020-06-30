@@ -28,6 +28,12 @@ ARG RUNTIME_IMAGE=gcr.io/linkerd-io/proxy:edge-20.4.1
 # See: https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/experimental.md#run---mounttypecache
 FROM $RUST_IMAGE as build
 
+RUN --mount=type=cache,target=/var/lib/apt/lists \
+    --mount=type=cache,target=/var/tmp \
+    apt update && apt install -y time
+WORKDIR /usr/src/linkerd2-proxy
+COPY . .
+
 # When set, causes the proxy to be compiled in development mode.
 ARG PROXY_UNOPTIMIZED
 
@@ -35,21 +41,17 @@ ARG PROXY_UNOPTIMIZED
 # may be set to `mock-orig-dst` for profiling builds.
 ARG PROXY_FEATURES
 
-RUN --mount=type=cache,target=/var/lib/apt/lists \
-    --mount=type=cache,target=/var/tmp \
-    apt update && apt install -y time
+ARG RUSTFLAGS="-C debuginfo=2 -C lto=off"
 
-WORKDIR /usr/src/linkerd2-proxy
-COPY . .
 RUN --mount=type=cache,target=target \
     --mount=type=cache,from=rust:1.44.1-buster,source=/usr/local/cargo,target=/usr/local/cargo \
-    mkdir -p /out && \
+    mkdir -p /out && cd linkerd2-proxy && \
     if [ -n "$PROXY_UNOPTIMIZED" ]; then \
-      (cd linkerd2-proxy && /usr/bin/time -v cargo build --locked --features="$PROXY_FEATURES") && \
-      mv target/debug/linkerd2-proxy /out/linkerd2-proxy ; \
+      (RUSTFLAGS="$RUSTFLAGS" /usr/bin/time -v cargo build --locked --features="$PROXY_FEATURES") && \
+      mv ../target/debug/linkerd2-proxy /out/linkerd2-proxy ; \
     else \
-      (cd linkerd2-proxy && /usr/bin/time -v cargo build --locked --release --features="$PROXY_FEATURES") && \
-      mv target/release/linkerd2-proxy /out/linkerd2-proxy ; \
+      (RUSTFLAGS="$RUSTFLAGS" /usr/bin/time -v cargo build --locked --release --features="$PROXY_FEATURES") && \
+      mv ../target/release/linkerd2-proxy /out/linkerd2-proxy ; \
     fi
 
 ## Install the proxy binary into the base runtime image.
