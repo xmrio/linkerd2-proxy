@@ -157,6 +157,10 @@ impl<L> Layers<L> {
         self.push(stack::MapResponseLayer::new(map_response))
     }
 
+    pub fn box_service<Req, Rsp, E>(self) -> Layers<Pair<L, stack::BoxLayer<Req, Rsp, E>>> {
+        self.push(stack::BoxLayer::new())
+    }
+
     pub fn box_http_request<B>(self) -> Layers<Pair<L, http::boxed::request::Layer<B>>>
     where
         B: hyper::body::HttpBody + 'static,
@@ -297,6 +301,14 @@ impl<S> Stack<S> {
         P: Fn(&Error) -> bool + Clone,
     {
         self.push(stack::FallbackLayer::new(fallback).with_predicate(predicate))
+    }
+
+    pub fn box_service<Req>(self) -> Stack<stack::BoxService<Req, S::Response, S::Error>>
+    where
+        S: tower::Service<Req> + Send + 'static,
+        S::Future: Send + 'static,
+    {
+        self.push(stack::BoxLayer::new())
     }
 
     // pub fn box_http_request<B>(self) -> Stack<http::boxed::BoxRequest<S, B>>
