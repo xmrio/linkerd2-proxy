@@ -58,6 +58,7 @@ linkerd2-router = { path = "../../router" }
 linkerd2-timeout = { path = "../../timeout" }
 linkerd2-service-profiles = { path = "../../service-profiles" }
 linkerd2-stack = { path = "../../stack" }
+linkerd2-lock = { path = "../../lock" }
 linkerd2-stack-metrics = { path = "../../stack/metrics" }
 linkerd2-stack-tracing = { path = "../../stack/tracing" }
 linkerd2-trace-context = { path = "../../trace-context" }

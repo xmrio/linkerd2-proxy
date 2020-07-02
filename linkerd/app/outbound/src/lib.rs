@@ -117,7 +117,8 @@ impl Config {
                         .push(metrics.layer(stack_labels("refine"))),
                 ),
             )
-            .spawn_buffer(self.proxy.buffer_capacity)
+            .box_service()
+            .push_lock()
             .instrument(|name: &dns::Name| info_span!("refine", %name))
             // Obtains the service, advances the state of the resolution
             .push(svc::make_response::Layer)
@@ -294,7 +295,8 @@ impl Config {
                         .push(metrics.stack.layer(stack_labels("balance"))),
                 ),
             )
-            .spawn_buffer(buffer_capacity)
+            .box_service()
+            .push_lock()
             .instrument(|c: &Concrete<http::Settings>| info_span!("balance", addr = %c.addr));
 
         // Caches clients that bypass discovery/balancing.
@@ -316,8 +318,9 @@ impl Config {
                             .box_http_request()
                             .push(metrics.stack.layer(stack_labels("forward.endpoint"))),
                     ),
-            )
-            .spawn_buffer(buffer_capacity)
+            )            
+            .box_service()
+            .push_lock()
             .instrument(|endpoint: &Target<HttpEndpoint>| {
                 info_span!("forward", peer.addr = %endpoint.addr, peer.id = ?endpoint.inner.identity)
             })
@@ -393,7 +396,8 @@ impl Config {
                         .push(metrics.stack.layer(stack_labels("profile"))),
                 ),
             )
-            .spawn_buffer(buffer_capacity)
+            .box_service()
+            .push_lock()
             .instrument(|_: &Profile| info_span!("profile"))
             .check_make_service::<Profile, Logical<HttpEndpoint>>()
             .push(router::Layer::new(|()| ProfilePerTarget))

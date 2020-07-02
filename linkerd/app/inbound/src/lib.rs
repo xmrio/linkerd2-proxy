@@ -237,7 +237,8 @@ impl Config {
                         .push(metrics.stack.layer(stack_labels("target"))),
                 ),
             )
-            .spawn_buffer(buffer_capacity)
+            .box_service()
+            .push_lock()
             .instrument(|_: &Target| info_span!("target"))
             .check_service::<Target>();
 
@@ -266,7 +267,8 @@ impl Config {
                         .push(metrics.stack.layer(stack_labels("profile"))),
                 ),
             )
-            .spawn_buffer(buffer_capacity)
+            .box_service()
+            .push_lock()
             .instrument(|p: &Profile| info_span!("profile", addr = %p.addr()))
             .check_make_service::<Profile, Target>()
             .push(router::Layer::new(|()| ProfileTarget))

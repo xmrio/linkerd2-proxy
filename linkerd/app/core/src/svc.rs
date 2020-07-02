@@ -5,6 +5,7 @@ use crate::transport::Connect;
 use crate::{cache, Error};
 pub use linkerd2_buffer as buffer;
 use linkerd2_concurrency_limit as concurrency_limit;
+pub use linkerd2_lock as lock;
 pub use linkerd2_stack::{self as stack, layer, NewService};
 pub use linkerd2_stack_tracing::{InstrumentMake, InstrumentMakeLayer};
 pub use linkerd2_timeout as timeout;
@@ -129,6 +130,11 @@ impl<L> Layers<L> {
         self.push(buffer::SpawnBufferLayer::new(capacity).with_idle_timeout(idle_timeout))
     }
 
+    /// Makes the inner service shareable in a mutually-exclusive fashion.
+    pub fn push_lock(self) -> Layers<Pair<L, lock::LockLayer>> {
+        self.push(lock::LockLayer::new())
+    }
+
     // Makes the service eagerly process and fail requests after the given timeout.
     pub fn push_failfast(self, timeout: Duration) -> Layers<Pair<L, timeout::FailFastLayer>> {
         self.push(timeout::FailFastLayer::new(timeout))
@@ -250,6 +256,11 @@ impl<S> Stack<S> {
 
     pub fn push_timeout(self, timeout: Duration) -> Stack<tower::timeout::Timeout<S>> {
         self.push(tower::timeout::TimeoutLayer::new(timeout))
+    }
+
+    /// Makes the inner service shareable in a mutually-exclusive fashion.
+    pub fn push_lock(self) -> Stack<lock::LockService<S>> {
+        self.push(lock::LockLayer::new())
     }
 
     // Makes the service eagerly process and fail requests after the given timeout.
