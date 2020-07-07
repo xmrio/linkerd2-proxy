@@ -2,10 +2,11 @@ use crate::{dns, identity::LocalIdentity};
 use linkerd2_app_core::{
     config::{ControlAddr, ControlConfig},
     control, reconnect, svc,
+    svc::NewService,
     transport::tls,
     Error,
 };
-use linkerd2_opencensus::{metrics, proto, SpanExporter};
+use linkerd2_opencensus::{export_spans, metrics, proto};
 use std::future::Future;
 use std::pin::Pin;
 use std::{collections::HashMap, time::SystemTime};
@@ -68,7 +69,7 @@ impl Config {
                     }))
                     .push(control::add_origin::Layer::new())
                     .into_new_service()
-                    .with_fixed_target(addr.clone());
+                    .new_service(addr.clone());
 
                 let (span_sink, spans_rx) = mpsc::channel(Self::SPAN_BUFFER_CAPACITY);
 
@@ -91,7 +92,7 @@ impl Config {
                     let addr = addr.clone();
                     Box::pin(async move {
                         debug!(peer.addr = ?addr, "running");
-                        SpanExporter::new(svc, node, spans_rx, metrics).await
+                        export_'spans(svc, node, spans_rx, metrics).await
                     })
                 };
 
