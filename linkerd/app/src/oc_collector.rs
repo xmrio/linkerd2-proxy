@@ -92,7 +92,7 @@ impl Config {
                     let addr = addr.clone();
                     Box::pin(async move {
                         debug!(peer.addr = ?addr, "running");
-                        export_'spans(svc, node, spans_rx, metrics).await
+                        export_spans(svc, node, spans_rx, metrics).await
                     })
                 };
 
