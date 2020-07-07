@@ -8,6 +8,10 @@ use linkerd2_app::{trace, Config};
 use linkerd2_signal as signal;
 pub use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[tokio::main(basic_scheduler)]
 async fn main() {
     let trace = trace::init();

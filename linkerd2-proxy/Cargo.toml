@@ -7,10 +7,12 @@ publish = false
 description = "The main proxy executable"
 
 [features]
+jemalloc  = ["jemallocator"]
 mock-orig-dst  = ["linkerd2-app/mock-orig-dst"]
 
 [dependencies]
 futures = { version = "0.3", features = ["compat"] }
+jemallocator = { version = "0.3.2", optional = true }
 linkerd2-app = { path = "../linkerd/app" }
 linkerd2-signal = { path = "../linkerd/signal" }
 tokio = { version = "0.2", features = ["rt-core"] }
