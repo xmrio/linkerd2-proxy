@@ -3,15 +3,16 @@ use http;
 use indexmap::IndexMap;
 use linkerd2_http_classify::ClassifyResponse;
 use linkerd2_metrics::{latency, Counter, FmtMetrics, Histogram};
+// use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 mod layer;
 mod report;
 
-type SharedRegistry<T, C> = Arc<Mutex<Registry<T, Metrics<C>>>>;
+type SharedRegistry<T, C> = Arc<RwLock<Registry<T, Metrics<C>>>>;
 
 #[derive(Debug)]
 pub struct Requests<T, C>(SharedRegistry<T, C>)
@@ -47,7 +48,7 @@ pub struct ClassMetrics {
 
 impl<T: Hash + Eq, C: Hash + Eq> Default for Requests<T, C> {
     fn default() -> Self {
-        Requests(Arc::new(Mutex::new(Registry::default())))
+        Requests(Arc::new(RwLock::new(Registry::default())))
     }
 }
 
@@ -138,7 +139,7 @@ mod tests {
         let retain_idle_for = Duration::from_secs(1);
         let r = super::Requests::<Target, Class>::default();
         let report = r.clone().into_report(retain_idle_for);
-        let mut registry = r.0.lock().unwrap();
+        let mut registry = r.0.write().unwrap();
 
         let before_update = Instant::now();
         let metrics = registry

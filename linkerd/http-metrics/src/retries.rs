@@ -2,12 +2,12 @@ use super::{LastUpdate, Prefixed, Registry, Report};
 use linkerd2_metrics::{Counter, FmtLabels, FmtMetric, FmtMetrics, Metric};
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tracing::trace;
 
 #[derive(Debug)]
-pub struct Retries<T>(Arc<Mutex<Registry<T, Metrics>>>)
+pub struct Retries<T>(Arc<RwLock<Registry<T, Metrics>>>)
 where
     T: Hash + Eq;
 
@@ -27,7 +27,7 @@ struct NoBudgetLabel;
 
 impl<T: Hash + Eq> Default for Retries<T> {
     fn default() -> Self {
-        Retries(Arc::new(Mutex::new(Registry::default())))
+        Retries(Arc::new(RwLock::new(Registry::default())))
     }
 }
 
@@ -37,13 +37,7 @@ impl<T: Hash + Eq> Retries<T> {
     }
 
     pub fn get_handle(&self, target: impl Into<T>) -> Handle {
-        let mut reg = self.0.lock().expect("retry metrics registry poisoned");
-        Handle(
-            reg.by_target
-                .entry(target.into())
-                .or_insert_with(|| Arc::new(Mutex::new(Metrics::default())))
-                .clone(),
-        )
+        Handle(Registry::get_or_insert_target(&self.0, target.into()))
     }
 }
 
@@ -104,31 +98,36 @@ where
     T: FmtLabels + Hash + Eq,
 {
     fn fmt_metrics(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut registry = match self.registry.lock() {
-            Err(_) => return Ok(()),
-            Ok(r) => r,
-        };
-        trace!(
-            prfefix = %self.prefix,
-            targets = %registry.by_target.len(),
-            "Formatting HTTP retry metrics",
-        );
+        {
+            let registry = match self.registry.read() {
+                Err(_) => return Ok(()),
+                Ok(r) => r,
+            };
+            trace!(
+                prfefix = %self.prefix,
+                targets = %registry.by_target.len(),
+                "Formatting HTTP retry metrics",
+            );
 
-        if registry.by_target.is_empty() {
-            return Ok(());
-        }
+            if registry.by_target.is_empty() {
+                return Ok(());
+            }
 
-        let metric = self.retryable_total();
-        metric.fmt_help(f)?;
-        for (tgt, tm) in &registry.by_target {
-            if let Ok(m) = tm.lock() {
-                m.retryable.fmt_metric_labeled(f, &metric.name, tgt)?;
-                m.no_budget
-                    .fmt_metric_labeled(f, &metric.name, (tgt, NoBudgetLabel))?;
+            let metric = self.retryable_total();
+            metric.fmt_help(f)?;
+            for (tgt, tm) in &registry.by_target {
+                if let Ok(m) = tm.lock() {
+                    m.retryable.fmt_metric_labeled(f, &metric.name, tgt)?;
+                    m.no_budget
+                        .fmt_metric_labeled(f, &metric.name, (tgt, NoBudgetLabel))?;
+                }
             }
         }
 
-        registry.retain_since(Instant::now() - self.retain_idle);
+        self.registry
+            .write()
+            .unwrap()
+            .retain_since(Instant::now() - self.retain_idle);
 
         Ok(())
     }

@@ -2,9 +2,10 @@
 
 pub use self::{requests::Requests, retries::Retries};
 use indexmap::IndexMap;
+// use parking_lot::RwLock;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 pub mod requests;
@@ -25,7 +26,7 @@ where
     T: Hash + Eq,
 {
     prefix: &'static str,
-    registry: Arc<Mutex<Registry<T, M>>>,
+    registry: Arc<RwLock<Registry<T, M>>>,
     /// The amount time metrics with no updates should be retained for reports
     retain_idle: Duration,
     /// Whether latencies should be reported.
@@ -77,11 +78,31 @@ where
     }
 }
 
+impl<T, M> Registry<T, M>
+where
+    T: Hash + Eq,
+    M: Default,
+{
+    pub(crate) fn get_or_insert_target(registry: &Arc<RwLock<Self>>, target: T) -> Arc<Mutex<M>> {
+        if let Some(metrics) = registry.read().unwrap().by_target.get(&target) {
+            metrics.clone()
+        } else {
+            let metrics = Arc::new(Mutex::new(M::default()));
+            registry
+                .write()
+                .unwrap()
+                .by_target
+                .insert(target, metrics.clone());
+            metrics
+        }
+    }
+}
+
 impl<T, M> Report<T, M>
 where
     T: Hash + Eq,
 {
-    fn new(retain_idle: Duration, registry: Arc<Mutex<Registry<T, M>>>) -> Self {
+    fn new(retain_idle: Duration, registry: Arc<RwLock<Registry<T, M>>>) -> Self {
         Self {
             prefix: "",
             registry,

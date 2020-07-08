@@ -44,36 +44,41 @@ where
     C: FmtLabels + Hash + Eq,
 {
     fn fmt_metrics(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut registry = match self.registry.lock() {
-            Err(_) => return Ok(()),
-            Ok(r) => r,
-        };
-        trace!(
-            prefix = self.prefix,
-            targets = registry.by_target.len(),
-            include_latencies = self.include_latencies,
-            "Formatting HTTP request metrics",
-        );
+        {
+            let registry = match self.registry.read() {
+                Err(_) => return Ok(()),
+                Ok(r) => r,
+            };
+            trace!(
+                prefix = self.prefix,
+                targets = registry.by_target.len(),
+                include_latencies = self.include_latencies,
+                "Formatting HTTP request metrics",
+            );
 
-        if registry.by_target.is_empty() {
-            return Ok(());
-        }
+            if registry.by_target.is_empty() {
+                return Ok(());
+            }
 
-        let metric = self.request_total();
-        metric.fmt_help(f)?;
-        registry.fmt_by_target(f, metric, |s| &s.total)?;
-
-        if self.include_latencies {
-            let metric = self.response_latency_ms();
+            let metric = self.request_total();
             metric.fmt_help(f)?;
-            registry.fmt_by_status(f, metric, |s| &s.latency)?;
+            registry.fmt_by_target(f, metric, |s| &s.total)?;
+
+            if self.include_latencies {
+                let metric = self.response_latency_ms();
+                metric.fmt_help(f)?;
+                registry.fmt_by_status(f, metric, |s| &s.latency)?;
+            }
+
+            let metric = self.response_total();
+            metric.fmt_help(f)?;
+            registry.fmt_by_class(f, metric, |s| &s.total)?;
         }
 
-        let metric = self.response_total();
-        metric.fmt_help(f)?;
-        registry.fmt_by_class(f, metric, |s| &s.total)?;
-
-        registry.retain_since(Instant::now() - self.retain_idle);
+        self.registry
+            .write()
+            .unwrap()
+            .retain_since(Instant::now() - self.retain_idle);
 
         Ok(())
     }

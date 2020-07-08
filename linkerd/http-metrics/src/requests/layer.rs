@@ -1,4 +1,4 @@
-use super::{ClassMetrics, Metrics, SharedRegistry, StatusMetrics};
+use super::{ClassMetrics, Metrics, Registry, SharedRegistry, StatusMetrics};
 use futures::{ready, TryFuture};
 use http;
 use http_body::Body;
@@ -171,21 +171,13 @@ where
     type Service = Service<M::Service, C>;
 
     fn new_service(&self, target: T) -> Self::Service {
-        let metrics = match self.registry.lock() {
-            Ok(mut r) => Some(
-                r.by_target
-                    .entry(target.clone().into())
-                    .or_insert_with(|| Arc::new(Mutex::new(Metrics::default())))
-                    .clone(),
-            ),
-            Err(_) => None,
-        };
+        let metrics = Registry::get_or_insert_target(&self.registry, target.clone().into());
 
         let inner = self.inner.new_service(target);
 
         Self::Service {
             inner,
-            metrics,
+            metrics: Some(metrics),
             _p: PhantomData,
         }
     }
@@ -208,21 +200,13 @@ where
     }
 
     fn call(&mut self, target: T) -> Self::Future {
-        let metrics = match self.registry.lock() {
-            Ok(mut r) => Some(
-                r.by_target
-                    .entry(target.clone().into())
-                    .or_insert_with(|| Arc::new(Mutex::new(Metrics::default())))
-                    .clone(),
-            ),
-            Err(_) => None,
-        };
+        let metrics = Registry::get_or_insert_target(&self.registry, target.clone().into());
 
         let inner = self.inner.call(target);
 
         Self::Future {
             inner,
-            metrics,
+            metrics: Some(metrics),
             _p: PhantomData,
         }
     }
