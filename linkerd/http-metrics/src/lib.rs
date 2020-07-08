@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 // use parking_lot::RwLock;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 pub mod requests;
@@ -16,7 +16,7 @@ struct Registry<T, M>
 where
     T: Hash + Eq,
 {
-    by_target: IndexMap<T, Arc<Mutex<M>>>,
+    by_target: IndexMap<T, Arc<RwLock<M>>>,
 }
 
 /// Reports metrics for prometheus.
@@ -73,7 +73,7 @@ where
     /// reference to the `RequestMetrics` structure and (2) have not been updated since `epoch`.
     fn retain_since(&mut self, epoch: Instant) {
         self.by_target.retain(|_, m| {
-            Arc::strong_count(&m) > 1 || m.lock().map(|m| m.last_update() >= epoch).unwrap_or(false)
+            Arc::strong_count(&m) > 1 || m.read().map(|m| m.last_update() >= epoch).unwrap_or(false)
         })
     }
 }
@@ -83,11 +83,11 @@ where
     T: Hash + Eq,
     M: Default,
 {
-    pub(crate) fn get_or_insert_target(registry: &Arc<RwLock<Self>>, target: T) -> Arc<Mutex<M>> {
+    pub(crate) fn get_or_insert_target(registry: &Arc<RwLock<Self>>, target: T) -> Arc<RwLock<M>> {
         if let Some(metrics) = registry.read().unwrap().by_target.get(&target) {
             metrics.clone()
         } else {
-            let metrics = Arc::new(Mutex::new(M::default()));
+            let metrics = Arc::new(RwLock::new(M::default()));
             registry
                 .write()
                 .unwrap()

@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
@@ -47,7 +47,7 @@ where
     C: ClassifyResponse,
     C::Class: Hash + Eq,
 {
-    metrics: Option<Arc<Mutex<Metrics<C::Class>>>>,
+    metrics: Option<Arc<RwLock<Metrics<C::Class>>>>,
     #[pin]
     inner: S,
     _p: PhantomData<fn() -> C>,
@@ -60,7 +60,7 @@ where
     C::Class: Hash + Eq,
 {
     classify: Option<C>,
-    metrics: Option<Arc<Mutex<Metrics<C::Class>>>>,
+    metrics: Option<Arc<RwLock<Metrics<C::Class>>>>,
     stream_open_at: Instant,
     #[pin]
     inner: F,
@@ -73,7 +73,7 @@ where
     B: Body,
     C: Hash + Eq,
 {
-    metrics: Option<Arc<Mutex<Metrics<C>>>>,
+    metrics: Option<Arc<RwLock<Metrics<C>>>>,
     #[pin]
     inner: B,
 }
@@ -88,7 +88,7 @@ where
 {
     status: http::StatusCode,
     classify: Option<C>,
-    metrics: Option<Arc<Mutex<Metrics<C::Class>>>>,
+    metrics: Option<Arc<RwLock<Metrics<C::Class>>>>,
     stream_open_at: Instant,
     latency_recorded: bool,
     #[pin]
@@ -269,8 +269,8 @@ where
         if req.body().is_end_stream() {
             if let Some(lock) = req_metrics.take() {
                 let now = Instant::now();
-                if let Ok(mut metrics) = lock.lock() {
-                    (*metrics).last_update = now;
+                if let Ok(metrics) = lock.read() {
+                    (*metrics).last_update.set(now);
                     (*metrics).total.incr();
                 }
             }
@@ -319,8 +319,8 @@ where
         if req.body().is_end_stream() {
             if let Some(lock) = req_metrics.take() {
                 let now = Instant::now();
-                if let Ok(mut metrics) = lock.lock() {
-                    (*metrics).last_update = now;
+                if let Ok(metrics) = lock.read() {
+                    (*metrics).last_update.set(now);
                     (*metrics).total.incr();
                 }
             }
@@ -411,9 +411,9 @@ where
 
         if let Some(lock) = this.metrics.take() {
             let now = Instant::now();
-            if let Ok(mut metrics) = lock.lock() {
-                (*metrics).last_update = now;
+            if let Ok(metrics) = lock.read() {
                 (*metrics).total.incr();
+                (*metrics).last_update.set(now);
             }
         }
 
@@ -477,20 +477,27 @@ where
             Some(lock) => lock,
             None => return,
         };
-        let mut metrics = match lock.lock() {
+
+        let metrics = match lock.read() {
             Ok(m) => m,
             Err(_) => return,
         };
 
-        (*metrics).last_update = now;
+        let status = Some(*this.status);
+        if let Some(status_metrics) = metrics.by_status.get(&status) {
+            status_metrics.latency.add(now - *this.stream_open_at);
+            (*metrics).last_update.set(Instant::now());
+        } else {
+            drop(metrics);
+            let mut metrics = lock.write().unwrap();
 
-        let status_metrics = metrics
-            .by_status
-            .entry(Some(*this.status))
-            .or_insert_with(|| StatusMetrics::default());
-
-        status_metrics.latency.add(now - *this.stream_open_at);
-
+            let status_metrics = metrics
+                .by_status
+                .entry(Some(*this.status))
+                .or_insert_with(|| StatusMetrics::default());
+            status_metrics.latency.add(now - *this.stream_open_at);
+            (*metrics).last_update.set(Instant::now());
+        }
         *this.latency_recorded = true;
     }
 
@@ -516,17 +523,19 @@ where
 }
 
 fn measure_class<C: Hash + Eq>(
-    lock: &Arc<Mutex<Metrics<C>>>,
+    lock: &Arc<RwLock<Metrics<C>>>,
     class: C,
     status: Option<http::StatusCode>,
 ) {
     let now = Instant::now();
-    let mut metrics = match lock.lock() {
+
+    // xxx eliza optimize this?
+    let mut metrics = match lock.write() {
         Ok(m) => m,
         Err(_) => return,
     };
 
-    (*metrics).last_update = now;
+    (*metrics).last_update.set(now);
 
     let status_metrics = metrics
         .by_status

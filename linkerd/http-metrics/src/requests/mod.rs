@@ -4,9 +4,10 @@ use indexmap::IndexMap;
 use linkerd2_http_classify::ClassifyResponse;
 use linkerd2_metrics::{latency, Counter, FmtMetrics, Histogram};
 // use parking_lot::RwLock;
+use std::cell::Cell;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 mod layer;
@@ -25,7 +26,7 @@ pub struct Metrics<C>
 where
     C: Hash + Eq,
 {
-    last_update: Instant,
+    last_update: Cell<Instant>,
     total: Counter,
     by_status: IndexMap<Option<http::StatusCode>, StatusMetrics<C>>,
 }
@@ -79,7 +80,7 @@ impl<T: Hash + Eq, C: Hash + Eq> Clone for Requests<T, C> {
 impl<C: Hash + Eq> Default for Metrics<C> {
     fn default() -> Self {
         Self {
-            last_update: Instant::now(),
+            last_update: Cell::new(Instant::now()),
             total: Counter::default(),
             by_status: IndexMap::default(),
         }
@@ -88,7 +89,7 @@ impl<C: Hash + Eq> Default for Metrics<C> {
 
 impl<C: Hash + Eq> LastUpdate for Metrics<C> {
     fn last_update(&self) -> Instant {
-        self.last_update
+        self.last_update.get()
     }
 }
 

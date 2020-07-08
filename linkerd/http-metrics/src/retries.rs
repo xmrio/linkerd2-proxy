@@ -1,8 +1,9 @@
 use super::{LastUpdate, Prefixed, Registry, Report};
 use linkerd2_metrics::{Counter, FmtLabels, FmtMetric, FmtMetrics, Metric};
+use std::cell::Cell;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tracing::trace;
 
@@ -12,11 +13,11 @@ where
     T: Hash + Eq;
 
 #[derive(Clone, Debug)]
-pub struct Handle(Arc<Mutex<Metrics>>);
+pub struct Handle(Arc<RwLock<Metrics>>);
 
 #[derive(Debug)]
 pub struct Metrics {
-    last_update: Instant,
+    last_update: Cell<Instant>,
     retryable: Counter,
     no_budget: Counter,
 }
@@ -51,8 +52,8 @@ impl<T: Hash + Eq> Clone for Retries<T> {
 
 impl Handle {
     pub fn incr_retryable(&self, has_budget: bool) {
-        if let Ok(mut m) = self.0.lock() {
-            m.last_update = Instant::now();
+        if let Ok(m) = self.0.read() {
+            m.last_update.set(Instant::now());
             m.retryable.incr();
             if !has_budget {
                 m.no_budget.incr();
@@ -66,7 +67,7 @@ impl Handle {
 impl Default for Metrics {
     fn default() -> Self {
         Self {
-            last_update: Instant::now(),
+            last_update: Cell::new(Instant::now()),
             retryable: Counter::default(),
             no_budget: Counter::default(),
         }
@@ -75,7 +76,7 @@ impl Default for Metrics {
 
 impl LastUpdate for Metrics {
     fn last_update(&self) -> Instant {
-        self.last_update
+        self.last_update.get()
     }
 }
 
@@ -116,7 +117,7 @@ where
             let metric = self.retryable_total();
             metric.fmt_help(f)?;
             for (tgt, tm) in &registry.by_target {
-                if let Ok(m) = tm.lock() {
+                if let Ok(m) = tm.read() {
                     m.retryable.fmt_metric_labeled(f, &metric.name, tgt)?;
                     m.no_budget
                         .fmt_metric_labeled(f, &metric.name, (tgt, NoBudgetLabel))?;

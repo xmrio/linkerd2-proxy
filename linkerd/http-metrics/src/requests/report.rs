@@ -101,7 +101,7 @@ where
         F: Fn(&Metrics<C>) -> &V,
     {
         for (tgt, tm) in &self.by_target {
-            if let Ok(m) = tm.lock() {
+            if let Ok(m) = tm.read() {
                 get_metric(&*m).fmt_metric_labeled(f, &metric.name, tgt)?;
             }
         }
@@ -121,7 +121,7 @@ where
         F: Fn(&StatusMetrics<C>) -> &M,
     {
         for (tgt, tm) in &self.by_target {
-            if let Ok(tm) = tm.lock() {
+            if let Ok(tm) = tm.read() {
                 for (status, m) in &tm.by_status {
                     let status = status.as_ref().map(|s| Status(*s));
                     let labels = (tgt, status);
@@ -145,7 +145,7 @@ where
         F: Fn(&ClassMetrics) -> &M,
     {
         for (tgt, tm) in &self.by_target {
-            if let Ok(tm) = tm.lock() {
+            if let Ok(tm) = tm.read() {
                 for (status, sm) in &tm.by_status {
                     for (cls, m) in &sm.by_class {
                         let status = status.as_ref().map(|s| Status(*s));
