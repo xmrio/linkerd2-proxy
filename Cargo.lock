@@ -1172,7 +1172,7 @@ dependencies = [
 [[package]]
 name = "linkerd2-proxy-api"
 version = "0.1.13"
-source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#7efd4910b17e5607a1814476ce69bcdbd8347c6e"
+source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#c40f9f24e9a2cc71a8293473bafcf505f18e918a"
 dependencies = [
  "h2 0.2.5",
  "http 0.2.1",
@@ -1484,6 +1484,32 @@ dependencies = [
  "linkerd2-error",
  "linkerd2-stack",
  "pin-project",
+ "tower",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
+name = "linkerd2-strategy"
+version = "0.1.0"
+dependencies = [
+ "bytes 0.5.4",
+ "futures 0.3.5",
+ "http 0.2.1",
+ "http-body",
+ "indexmap",
+ "linkerd2-addr",
+ "linkerd2-dns",
+ "linkerd2-error",
+ "linkerd2-proxy-api",
+ "linkerd2-stack",
+ "pin-project",
+ "prost-types",
+ "quickcheck",
+ "rand 0.7.2",
+ "regex 1.0.0",
+ "tokio",
+ "tonic",
  "tower",
  "tracing",
  "tracing-futures",

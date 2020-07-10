@@ -1,0 +1,43 @@
+[package]
+name = "linkerd2-strategy"
+version = "0.1.0"
+authors = ["Linkerd Developers <cncf-linkerd-dev@lists.cncf.io>"]
+edition = "2018"
+publish = false
+
+[features]
+rustfmt = ["linkerd2-proxy-api/rustfmt"]
+
+[dependencies]
+bytes = "0.5"
+futures = "0.3"
+http = "0.2"
+http-body = "0.3"
+indexmap = "1.0"
+linkerd2-addr = { path  = "../addr" }
+linkerd2-dns = { path  = "../dns" }
+linkerd2-error = { path  = "../error" }
+linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", branch = "ver/profiles-detection" }
+linkerd2-stack = { path  = "../stack" }
+rand = { version = "0.7", features = ["small_rng"] }
+regex = "1.0.0"
+tokio = { version = "0.2", features = ["macros", "sync", "time"] }
+tonic = { version = "0.2", default-features = false }
+tracing = "0.1.9"
+tracing-futures = { version = "0.2", features = ["std-future"] }
+pin-project = "0.4"
+
+[dependencies.tower]
+version = "0.3"
+# disable tower's tracing `log` integration for performance reasons, since we
+# will consume tower's traces as traces.
+default-features = false
+features = [
+    "util",
+    "retry",
+]
+
+[dev-dependencies]
+linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", branch = "ver/profiles-detection", features = ["arbitrary"] }
+prost-types = "0.6.0"
+quickcheck = { version = "0.9", default-features = false }

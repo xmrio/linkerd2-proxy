@@ -49,6 +49,7 @@ members = [
     "linkerd/stack",
     "linkerd/stack/metrics",
     "linkerd/stack/tracing",
+    "linkerd/strategy",
     "linkerd/timeout",
     "linkerd2-proxy",
     "opencensus-proto",

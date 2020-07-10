@@ -288,6 +288,16 @@ impl pb::destination_server::Destination for Controller {
 
         Err(grpc_no_results())
     }
+
+    type StrategyStream =
+        Pin<Box<dyn Stream<Item = Result<pb::StrategyResponse, grpc::Status>> + Send + Sync>>;
+
+    async fn strategy(
+        &self,
+        _: grpc::Request<pb::StrategyRequest>,
+    ) -> Result<grpc::Response<Self::StrategyStream>, grpc::Status> {
+        Err(grpc_no_results())
+    }
 }
 
 impl Listening {
