@@ -1172,7 +1172,7 @@ dependencies = [
 [[package]]
 name = "linkerd2-proxy-api"
 version = "0.1.13"
-source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#23316fc77755f4dd51ace402676bcab8f02ced97"
+source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#7efd4910b17e5607a1814476ce69bcdbd8347c6e"
 dependencies = [
  "h2 0.2.5",
  "http 0.2.1",

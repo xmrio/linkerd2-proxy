@@ -74,53 +74,6 @@ pub(in crate) fn to_authority(o: AuthorityOverride) -> Option<Authority> {
 }
 
 pub(in crate) fn to_sock_addr(pb: TcpAddress) -> Option<SocketAddr> {
-    use crate::api::net::ip_address::Ip;
-    use std::net::{Ipv4Addr, Ipv6Addr};
-    /*
-    current structure is:
-    TcpAddress {
-        ip: Option<IpAddress {
-            ip: Option<enum Ip {
-                Ipv4(u32),
-                Ipv6(IPv6 {
-                    first: u64,
-                    last: u64,
-                }),
-            }>,
-        }>,
-        port: u32,
-    }
-    */
-    match pb.ip {
-        Some(ip) => match ip.ip {
-            Some(Ip::Ipv4(octets)) => {
-                let ipv4 = Ipv4Addr::from(octets);
-                Some(SocketAddr::from((ipv4, pb.port as u16)))
-            }
-            Some(Ip::Ipv6(v6)) => {
-                let octets = [
-                    (v6.first >> 56) as u8,
-                    (v6.first >> 48) as u8,
-                    (v6.first >> 40) as u8,
-                    (v6.first >> 32) as u8,
-                    (v6.first >> 24) as u8,
-                    (v6.first >> 16) as u8,
-                    (v6.first >> 8) as u8,
-                    v6.first as u8,
-                    (v6.last >> 56) as u8,
-                    (v6.last >> 48) as u8,
-                    (v6.last >> 40) as u8,
-                    (v6.last >> 32) as u8,
-                    (v6.last >> 24) as u8,
-                    (v6.last >> 16) as u8,
-                    (v6.last >> 8) as u8,
-                    v6.last as u8,
-                ];
-                let ipv6 = Ipv6Addr::from(octets);
-                Some(SocketAddr::from((ipv6, pb.port as u16)))
-            }
-            None => None,
-        },
-        None => None,
-    }
+    use std::convert::TryFrom;
+    SocketAddr::try_from(pb).ok()
 }
