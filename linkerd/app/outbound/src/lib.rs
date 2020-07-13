@@ -43,6 +43,7 @@ pub mod endpoint;
 mod orig_proto_upgrade;
 mod prevent_loop;
 mod require_identity_on_endpoint;
+mod strategy;
 
 use self::orig_proto_upgrade::OrigProtoUpgradeLayer;
 use self::prevent_loop::PreventLoop;
