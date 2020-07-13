@@ -130,8 +130,7 @@ where
                 return Err(grpc::Status::new(grpc::Code::Ok, "Backoff exhausted").into());
             }
 
-            let res = Self::init(service, req.clone()).await;
-            match res {
+            match Self::init(service, req.clone()).await {
                 Ok(rsp) => return Ok(rsp),
                 Err(status) => {
                     // Reuse the existing backoff instead of resetting.
