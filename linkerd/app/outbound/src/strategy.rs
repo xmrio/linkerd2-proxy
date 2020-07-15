@@ -1,13 +1,15 @@
 #![allow(warnings)]
 
 use futures::prelude::*;
-use linkerd2_app_core::Never;
+use linkerd2_app_core::{transport::BoxedIo, Never};
 use std::{
+    io,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::net::TcpStream;
+use tracing::info;
 
 #[derive(Clone, Debug)]
 pub struct Router {}
@@ -18,10 +20,16 @@ pub struct Accept {
     detect: Detect,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 enum Detect {
     Opaque,
     Client,
+}
+
+enum Protocol {
+    Unknown,
+    Http,
+    H2,
 }
 
 impl tower::Service<SocketAddr> for Router {
@@ -52,25 +60,57 @@ impl tower::Service<TcpStream> for Accept {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, tcp_stream: TcpStream) -> Self::Future {
+    fn call(&mut self, tcp: TcpStream) -> Self::Future {
+        let target = self.target;
         let detect = self.detect.clone();
+
         Box::pin(async move {
-            let process: Pin<Box<dyn Future<Output = ()> + Send + 'static>> = match detect {
-                Detect::Opaque => {
-                    Box::pin(async move {
-                        // TODO forward
-                        drop(tcp_stream);
-                    })
-                }
-                Detect::Client => {
-                    Box::pin(async move {
-                        // TODO sniff  SNI.
-                        // TODO detect HTTP.
-                        drop(tcp_stream);
-                    })
+            let response: Self::Response = match detect.detect(target, tcp).await {
+                Ok((protocol, io)) => Box::pin(proxy(target, protocol, io)),
+                Err(error) => {
+                    info!(%error, "Failed to detect protocol");
+                    Box::pin(future::ready(()))
                 }
             };
-            Ok(process)
+
+            Ok(response)
         })
     }
+}
+
+impl Detect {
+    pub async fn detect(
+        &self,
+        target: SocketAddr,
+        tcp: TcpStream,
+    ) -> io::Result<(Protocol, BoxedIo)> {
+        match self {
+            Self::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
+            Self::Client => {
+                // TODO sniff  SNI.
+                // TODO detect HTTP.
+                unimplemented!();
+            }
+        }
+    }
+}
+
+async fn proxy(target: SocketAddr, protocol: Protocol, io: BoxedIo) {
+    match protocol {
+        Protocol::Unknown => proxy_tcp(target, io).await,
+        Protocol::Http => proxy_http(target, io).await,
+        Protocol::H2 => proxy_h2(target, io).await,
+    }
+}
+
+async fn proxy_tcp(target: SocketAddr, io: BoxedIo) {
+    unimplemented!("TCP proxy")
+}
+
+async fn proxy_http(target: SocketAddr, io: BoxedIo) {
+    unimplemented!("HTTP/1 proxy")
+}
+
+async fn proxy_h2(target: SocketAddr, io: BoxedIo) {
+    unimplemented!("HTTP/2 proxy")
 }
