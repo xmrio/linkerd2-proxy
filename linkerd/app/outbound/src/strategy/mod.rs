@@ -7,6 +7,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::net::TcpStream;
 use tracing::info;
@@ -20,10 +21,10 @@ pub struct Accept {
     detect: Detect,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 enum Detect {
     Opaque,
-    Client,
+    Client { timeout: Duration, }
 }
 
 enum Protocol {
