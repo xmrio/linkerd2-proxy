@@ -431,11 +431,10 @@ impl Config {
             .into_inner()
     }
 
-    pub async fn build_server<C, R, H, S>(
+    pub async fn build_server<C, H, S>(
         self,
         listen_addr: std::net::SocketAddr,
         listen: impl Stream<Item = std::io::Result<transport::listen::Connection>> + Send + 'static,
-        refine: R,
         tcp_connect: C,
         http_router: H,
         metrics: ProxyMetrics,
@@ -443,12 +442,6 @@ impl Config {
         drain: drain::Watch,
     ) -> Result<(), Error>
     where
-        R: tower::Service<dns::Name, Error = Error, Response = dns::Name>
-            + Unpin
-            + Clone
-            + Send
-            + 'static,
-        R::Future: Unpin + Send,
         C: tower::Service<TcpEndpoint, Error = Error> + Unpin + Clone + Send + Sync + 'static,
         C::Response: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
         C::Future: Unpin + Send,
@@ -466,18 +459,14 @@ impl Config {
             + 'static,
         S::Future: Send,
     {
-        let Config {
-            canonicalize_timeout,
-            proxy:
-                ProxyConfig {
-                    server: ServerConfig { h2_settings, .. },
-                    disable_protocol_detection_for_ports,
-                    dispatch_timeout,
-                    max_in_flight_requests,
-                    detect_protocol_timeout,
-                    ..
-                },
-        } = self;
+        let ProxyConfig {
+            server: ServerConfig { h2_settings, .. },
+            disable_protocol_detection_for_ports,
+            dispatch_timeout,
+            max_in_flight_requests,
+            detect_protocol_timeout,
+            ..
+        } = self.proxy;
 
         // The stack is served lazily since caching layers spawn tasks from
         // their constructor. This helps to ensure that tasks are spawned on the
@@ -507,9 +496,6 @@ impl Config {
             .push(metrics.clone().http_handle_time.layer());
 
         let http_server = svc::stack(http_router)
-            // Resolve the application-emitted destination via DNS to determine                                                                                                                      
-            // its canonical FQDN to use for routing.                                                                                                                                                
-            .push(http::canonicalize::Layer::new(refine, canonicalize_timeout))
             .check_make_service::<Logical<HttpEndpoint>, http::Request<_>>()
             .push_make_ready()
             .push_timeout(dispatch_timeout)

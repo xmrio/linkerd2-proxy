@@ -180,9 +180,6 @@ impl Config {
                     .build_server(
                         outbound_addr,
                         outbound_listen,
-                        svc::stack(refine.clone())
-                            .push_map_response(|(n, _)| n)
-                            .into_inner(),
                         outbound_connect,
                         outbound_http.clone(),
                         outbound_metrics,
