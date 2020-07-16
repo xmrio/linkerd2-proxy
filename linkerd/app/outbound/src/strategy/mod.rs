@@ -28,12 +28,13 @@ pub struct Strategy {
     detect: Detect,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 enum Detect {
     Opaque,
     Client,
 }
 
+#[derive(Copy, Clone, Debug)]
 enum Protocol {
     Unknown,
     Http,
@@ -63,6 +64,19 @@ where
     }
 }
 
+impl Strategy {
+    async fn detect(&self, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
+        match self.detect {
+            Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
+            Detect::Client => {
+                // TODO sniff  SNI.
+                // TODO detect HTTP.
+                unimplemented!();
+            }
+        }
+    }
+}
+
 impl tower::Service<TcpStream> for Accept {
     type Response = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
     type Error = io::Error;
@@ -79,42 +93,27 @@ impl tower::Service<TcpStream> for Accept {
             let (protocol, io) = strategy.detect(tcp).await?;
 
             let rsp: Self::Response = Box::pin(async move {
-                strategy.proxy(protocol, io).await;
+                match protocol {
+                    Protocol::Unknown => Self::proxy_tcp(&strategy, io).await,
+                    Protocol::Http => Self::proxy_http(&strategy, io).await,
+                    Protocol::H2 => Self::proxy_h2(&strategy, io).await,
+                }
             });
             Ok(rsp)
         })
     }
 }
 
-impl Strategy {
-    async fn detect(&self, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
-        match self.detect {
-            Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
-            Detect::Client => {
-                // TODO sniff  SNI.
-                // TODO detect HTTP.
-                unimplemented!();
-            }
-        }
-    }
-
-    async fn proxy(self, protocol: Protocol, io: BoxedIo) {
-        match protocol {
-            Protocol::Unknown => self.proxy_tcp(io).await,
-            Protocol::Http => self.proxy_http(io).await,
-            Protocol::H2 => self.proxy_h2(io).await,
-        }
-    }
-
-    async fn proxy_tcp(self, io: BoxedIo) {
+impl Accept {
+    async fn proxy_tcp(strategy: &Strategy, io: BoxedIo) {
         unimplemented!("TCP proxy")
     }
 
-    async fn proxy_http(self, io: BoxedIo) {
+    async fn proxy_http(strategy: &Strategy, io: BoxedIo) {
         unimplemented!("HTTP/1 proxy")
     }
 
-    async fn proxy_h2(self, io: BoxedIo) {
+    async fn proxy_h2(strategy: &Strategy, io: BoxedIo) {
         unimplemented!("HTTP/2 proxy")
     }
 }
