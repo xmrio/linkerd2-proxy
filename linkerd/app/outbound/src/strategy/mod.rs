@@ -32,25 +32,18 @@ struct Config {
     metrics: ProxyMetrics,
 }
 
-#[derive(Clone, Debug)]
-pub struct Strategy {
-    target: SocketAddr,
-    detect: Detect,
-}
-
-#[allow(dead_code)]
-#[derive(Copy, Clone, Debug)]
-enum Detect {
-    Opaque,
-    Client,
-}
-
 #[allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
 enum Protocol {
     Unknown,
     Http,
     H2,
+}
+
+impl Default for Detect {
+    fn default() -> Self {
+        Self::Client
+    }
 }
 
 impl<S> tower::Service<SocketAddr> for Router<S>
@@ -76,19 +69,6 @@ where
 
             return Ok(Accept { config, strategy });
         })
-    }
-}
-
-impl Strategy {
-    async fn detect(&self, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
-        match self.detect {
-            Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
-            Detect::Client => {
-                // TODO sniff  SNI.
-                // TODO detect HTTP.
-                unimplemented!();
-            }
-        }
     }
 }
 
@@ -123,6 +103,17 @@ impl tower::Service<TcpStream> for Accept {
 
 #[allow(warnings)]
 impl Accept {
+    async fn detect(detect: Detect, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
+        match self.detect {
+            Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
+            Detect::Client => {
+                // TODO sniff  SNI.
+                // TODO detect HTTP.
+                unimplemented!();
+            }
+        }
+    }
+
     async fn proxy_tcp(config: Config, strategy: Strategy, io: BoxedIo) {
         unimplemented!("TCP proxy")
     }
