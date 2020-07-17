@@ -17,7 +17,7 @@ indexmap = "1.0"
 linkerd2-addr = { path  = "../addr" }
 linkerd2-dns = { path  = "../dns" }
 linkerd2-error = { path  = "../error" }
-linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", branch = "ver/profiles-detection", features = ["rustfmt"] }
+linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", branch = "ver/profiles-detection" }
 linkerd2-stack = { path  = "../stack" }
 rand = { version = "0.7", features = ["small_rng"] }
 regex = "1.0.0"

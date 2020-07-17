@@ -22,9 +22,9 @@ pub struct Client<S, R> {
 
 #[derive(Clone, Debug)]
 pub struct Strategy {
-    addr: SocketAddr,
-    detect: Detect,
-    target: Target,
+    pub addr: SocketAddr,
+    pub detect: Detect,
+    pub target: Target,
 }
 
 #[derive(Copy, Clone, Debug)]

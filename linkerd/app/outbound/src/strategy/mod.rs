@@ -5,6 +5,7 @@ use linkerd2_app_core::{
     transport::{tls, BoxedIo},
     Error, ProxyMetrics,
 };
+use linkerd2_strategy::{Detect, Strategy};
 use std::{
     io,
     net::SocketAddr,
@@ -38,12 +39,6 @@ enum Protocol {
     Unknown,
     Http,
     H2,
-}
-
-impl Default for Detect {
-    fn default() -> Self {
-        Self::Client
-    }
 }
 
 impl<S> tower::Service<SocketAddr> for Router<S>
@@ -87,7 +82,7 @@ impl tower::Service<TcpStream> for Accept {
         let strategy = self.strategy.borrow().clone();
 
         Box::pin(async move {
-            let (protocol, io) = strategy.detect(tcp).await?;
+            let (protocol, io) = Self::detect(strategy.detect, tcp).await?;
 
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
@@ -96,15 +91,16 @@ impl tower::Service<TcpStream> for Accept {
                     Protocol::H2 => Self::proxy_h2(config, strategy, io).await,
                 }
             });
+
             Ok(rsp)
         })
     }
 }
 
-#[allow(warnings)]
+#[allow(unused_variables)]
 impl Accept {
     async fn detect(detect: Detect, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
-        match self.detect {
+        match detect {
             Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
             Detect::Client => {
                 // TODO sniff  SNI.
