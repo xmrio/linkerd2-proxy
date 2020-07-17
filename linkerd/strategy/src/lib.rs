@@ -4,6 +4,7 @@ use futures::prelude::*;
 use http_body::Body as HttpBody;
 use linkerd2_error::{Error, Recover};
 use linkerd2_proxy_api::destination::{self as api, destination_client::DestinationClient};
+use rand::distributions::WeightedIndex;
 use std::{
     collections::HashMap,
     convert::TryFrom,
@@ -51,7 +52,8 @@ pub enum Target {
     },
     Logical {
         metric_labels: HashMap<String, String>,
-        targets: Vec<(Target, u32)>,
+        weights: WeightedIndex<u32>,
+        targets: Vec<Target>,
     },
 }
 
@@ -272,24 +274,24 @@ impl Target {
                 inner,
             }) => {
                 let api::target::logical::Inner::Split(split) = inner?;
-                let targets = split
-                    .targets
-                    .into_iter()
-                    .filter_map(|api::WeightedTarget { target, weight }| {
-                        if weight > 0 {
-                            let t = Target::new(target?)?;
-                            Some((t, weight))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                if targets.is_empty() {
-                    return None;
+
+                let mut targets = Vec::with_capacity(split.targets.len());
+                let mut weights = Vec::with_capacity(split.targets.len());
+                for api::WeightedTarget { target, weight } in split.targets.into_iter() {
+                    if weight > 0 {
+                        let target = Target::new(target?)?;
+                        targets.push(target);
+                        weights.push(weight);
+                    }
                 }
+                debug_assert_eq!(weights.len(), targets.len());
+
+                // Returns None if weights is empty.
+                let weights = WeightedIndex::new(weights).ok()?;
                 Self::Logical {
                     metric_labels,
                     targets,
+                    weights,
                 }
             }
         };

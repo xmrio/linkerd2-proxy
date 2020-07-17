@@ -5,7 +5,8 @@ use linkerd2_app_core::{
     transport::{tls, BoxedIo},
     Error, ProxyMetrics,
 };
-use linkerd2_strategy::{Detect, Strategy};
+use linkerd2_strategy::{Detect, Strategy, Target};
+use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
     io,
     net::SocketAddr,
@@ -86,8 +87,8 @@ impl tower::Service<TcpStream> for Accept {
 
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
-                    Protocol::Unknown => Self::proxy_tcp(config, strategy, io).await,
-                    Protocol::Http => Self::proxy_http(config, strategy, io).await,
+                    Protocol::Unknown => Self::proxy_tcp(config, strategy.target, io).await,
+                    Protocol::Http1 => Self::proxy_http1(config, strategy, io).await,
                     Protocol::H2 => Self::proxy_h2(config, strategy, io).await,
                 }
             });
@@ -111,18 +112,54 @@ impl Accept {
                 // per peek.
                 let io = tcp.peek(8192).await?;
 
-                let proto = match Version::from_prefix(io.prefix().as_ref()) {
-                    None => Protocol::Unknown,
-                    Some(Version::Http1) => Protocol::Http1,
-                    Some(Version::Http1) => Protocol::H2,
-                };
+                let proto = Version::from_prefix(io.prefix().as_ref())
+                    .map(|v| match v {
+                        Version::Http1 => Protocol::Http1,
+                        Version::H2 => Protocol::H2,
+                    })
+                    .unwrap_or(Protocol::Unknown);
 
                 Ok((proto, BoxedIo::new(io)))
             }
         }
     }
 
-    async fn proxy_tcp(config: Config, strategy: Strategy, io: BoxedIo) {
+    async fn proxy_tcp(config: Config, target: Target, io: BoxedIo) {
+        match target {
+            Target::Logical {
+                weights,
+                targets,
+                metric_labels,
+            } => {}
+
+            Target::Endpoint { addr } => {}
+
+            Target::Concrete {
+                authority,
+                metric_labels,
+            } => {}
+        }
+
+        let Config {
+            config,
+            identity,
+            metrics: _,
+        } = config;
+
+        // // Establishes connections to remote peers (for both TCP
+        // // forwarding and HTTP proxying).
+        // let forward = svc::connect(config.connect.keepalive)
+        //     // Initiates mTLS if the target is configured with identity.
+        //     .push(tls::client::ConnectLayer::new(identity))
+        //     // Limits the time we wait for a connection to be established.
+        //     .push_timeout(config.connect.timeout)
+        //     //.push(metrics.transport.layer_connect(TransportLabels))
+        //     // push(admit::AdmitLayer::new(PreventLoop::from(
+        //     //     listen_addr.port(),
+        //     // )))
+        //     .push_map_target(|meta: tls::accept::Meta| TcpEndpoint::from(meta.addrs.target_addr()))
+        //     .push(svc::layer::mk(tcp::Forward::new));
+
         unimplemented!("TCP proxy")
     }
 

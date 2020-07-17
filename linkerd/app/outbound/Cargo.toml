@@ -17,6 +17,7 @@ linkerd2-app-core = { path = "../core" }
 linkerd2-identity = { path = "../../identity" }
 linkerd2-retry = { path = "../../retry" }
 linkerd2-strategy = { path = "../../strategy", features = ["rustfmt"] } # FIXME rustfmt should be disabled before merge
+rand = { version = "0.7", features = ["small_rng"] }
 tokio = { version = "0.2", features = ["sync"]}
 tracing = "0.1.9"
 pin-project = "0.4"
