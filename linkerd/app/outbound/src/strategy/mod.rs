@@ -37,7 +37,7 @@ struct Config {
 #[derive(Copy, Clone, Debug)]
 enum Protocol {
     Unknown,
-    Http,
+    Http1,
     H2,
 }
 
@@ -103,9 +103,21 @@ impl Accept {
         match detect {
             Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
             Detect::Client => {
+                use linkerd2_app_core::{proxy::http::Version, transport::io::Peekable};
+
                 // TODO sniff  SNI.
-                // TODO detect HTTP.
-                unimplemented!();
+
+                // TODO take advantage TcpStream::peek to avoid allocating a buf
+                // per peek.
+                let io = tcp.peek(8192).await?;
+
+                let proto = match Version::from_prefix(io.prefix().as_ref()) {
+                    None => Protocol::Unknown,
+                    Some(Version::Http1) => Protocol::Http1,
+                    Some(Version::Http1) => Protocol::H2,
+                };
+
+                Ok((proto, BoxedIo::new(io)))
             }
         }
     }
@@ -114,7 +126,7 @@ impl Accept {
         unimplemented!("TCP proxy")
     }
 
-    async fn proxy_http(config: Config, strategy: Strategy, io: BoxedIo) {
+    async fn proxy_http1(config: Config, strategy: Strategy, io: BoxedIo) {
         unimplemented!("HTTP/1 proxy")
     }
 
