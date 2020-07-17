@@ -69,35 +69,22 @@ where
     R::Backoff: Send + Unpin,
 {
     pub async fn watch(&mut self, addr: SocketAddr) -> Result<watch::Receiver<Strategy>, Error> {
+        let mut service = self.service.clone();
+        let mut recover = self.recover.clone();
         let req = api::StrategyRequest {
             target: Some(addr.into()),
             context_token: self.context_token.clone(),
         };
 
-        let (strategy, stream) = match Self::init(addr, &mut self.service, req.clone()).await {
+        let (strategy, stream) = match Self::init(addr, &mut service, req.clone()).await {
             Ok(rsp) => rsp,
             Err(status) => {
-                Self::recover(
-                    addr,
-                    &mut self.service,
-                    req.clone(),
-                    &mut self.recover,
-                    status,
-                )
-                .await?
+                Self::recover(addr, &mut service, req.clone(), &mut recover, status).await?
             }
         };
 
         let (tx, rx) = watch::channel(strategy);
-        tokio::spawn(Self::daemon(
-            addr,
-            self.service.clone(),
-            req,
-            self.recover.clone(),
-            tx,
-            stream,
-        ));
-
+        tokio::spawn(Self::daemon(addr, service, req, recover, tx, stream));
         Ok(rx)
     }
 
