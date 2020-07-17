@@ -1,4 +1,4 @@
-use crate::http::uri::Authority;
+use ::http::uri::Authority;
 use indexmap::IndexMap;
 use linkerd2_app_core::{
     dst, metric_labels,
