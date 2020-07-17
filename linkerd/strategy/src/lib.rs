@@ -276,11 +276,12 @@ impl Target {
                     .targets
                     .into_iter()
                     .filter_map(|api::WeightedTarget { target, weight }| {
-                        if weight == 0 {
-                            return None;
+                        if weight > 0 {
+                            let t = Target::new(target?)?;
+                            Some((t, weight))
+                        } else {
+                            None
                         }
-                        let t = Target::new(target?)?;
-                        Some((t, weight))
                     })
                     .collect::<Vec<_>>();
                 if targets.is_empty() {
