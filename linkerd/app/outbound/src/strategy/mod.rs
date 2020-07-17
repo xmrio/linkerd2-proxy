@@ -14,6 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{net::TcpStream, sync::watch};
+use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct Router<S> {
@@ -32,6 +33,7 @@ struct Config {
     config: ProxyConfig,
     identity: tls::Conditional<identity::Local>,
     metrics: ProxyMetrics,
+    rng: SmallRng,
 }
 
 #[allow(dead_code)]
@@ -79,7 +81,6 @@ impl tower::Service<TcpStream> for Accept {
 
     fn call(&mut self, tcp: TcpStream) -> Self::Future {
         let config = self.config.clone();
-
         let strategy = self.strategy.borrow().clone();
 
         Box::pin(async move {
@@ -87,7 +88,9 @@ impl tower::Service<TcpStream> for Accept {
 
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
-                    Protocol::Unknown => Self::proxy_tcp(config, strategy.target, io).await,
+                    Protocol::Unknown => {
+                        Self::proxy_tcp(config, strategy.addr, strategy.target, io).await
+                    }
                     Protocol::Http1 => Self::proxy_http1(config, strategy, io).await,
                     Protocol::H2 => Self::proxy_h2(config, strategy, io).await,
                 }
@@ -124,43 +127,65 @@ impl Accept {
         }
     }
 
-    async fn proxy_tcp(config: Config, target: Target, io: BoxedIo) {
-        match target {
-            Target::Logical {
-                weights,
-                targets,
-                metric_labels,
-            } => {}
+    async fn proxy_tcp(mut config: Config, addr: SocketAddr, mut target: Target, io: BoxedIo) {
+        loop {
+            target = match target {
+                Target::Logical {
+                    metric_labels,
+                    targets,
+                    weights,
+                } => {
+                    let idx = weights.sample(&mut config.rng);
+                    debug_assert!(idx < targets.len());
+                    targets[idx].clone()
+                }
 
-            Target::Endpoint { addr } => {}
+                Target::Concrete {
+                    authority,
+                    metric_labels,
+                } => {
+                    // TODO TCP discovery/balancing.
+                    warn!("TCP load balancing not supported yet; forwarding");
+                    Target::Endpoint { addr }
+                }
 
-            Target::Concrete {
-                authority,
-                metric_labels,
-            } => {}
+                Target::Endpoint { addr } => {
+                    use crate::endpoint::TcpEndpoint;
+                    use linkerd2_app_core::{proxy::tcp, svc};
+
+                    let Config {
+                        config,
+                        identity,
+                        .. // FIXME
+                    } = config;
+
+                    // Establishes connections to remote peers (for both TCP
+                    // forwarding and HTTP proxying).
+                    let mut connect = svc::connect(config.connect.keepalive)
+                        // Initiates mTLS if the target is configured with identity.
+                        .push(tls::client::ConnectLayer::new(identity))
+                        // Limits the time we wait for a connection to be established.
+                        .push_timeout(config.connect.timeout)
+                        //.push(metrics.transport.layer_connect(TransportLabels))
+                        // push(admit::AdmitLayer::new(PreventLoop::from(
+                        //     listen_addr.port(),
+                        // )))
+                        .push_map_target(|addr: SocketAddr| TcpEndpoint::from(addr))
+                        .into_inner();
+
+                    match tcp::forward::forward(&mut connect, addr, io).await {
+                        Ok(()) => {
+                            info!("TCP stream completed");
+                        }
+                        Err(error) => {
+                            info!(%error, "TCP stream completed");
+                        }
+                    }
+
+                    return;
+                }
+            }
         }
-
-        let Config {
-            config,
-            identity,
-            metrics: _,
-        } = config;
-
-        // // Establishes connections to remote peers (for both TCP
-        // // forwarding and HTTP proxying).
-        // let forward = svc::connect(config.connect.keepalive)
-        //     // Initiates mTLS if the target is configured with identity.
-        //     .push(tls::client::ConnectLayer::new(identity))
-        //     // Limits the time we wait for a connection to be established.
-        //     .push_timeout(config.connect.timeout)
-        //     //.push(metrics.transport.layer_connect(TransportLabels))
-        //     // push(admit::AdmitLayer::new(PreventLoop::from(
-        //     //     listen_addr.port(),
-        //     // )))
-        //     .push_map_target(|meta: tls::accept::Meta| TcpEndpoint::from(meta.addrs.target_addr()))
-        //     .push(svc::layer::mk(tcp::Forward::new));
-
-        unimplemented!("TCP proxy")
     }
 
     async fn proxy_http1(config: Config, strategy: Strategy, io: BoxedIo) {

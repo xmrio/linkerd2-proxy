@@ -44,6 +44,7 @@ pub enum Detect {
 pub enum Target {
     Endpoint {
         addr: SocketAddr,
+        // FIXME metadata, TLS...
     },
     Concrete {
         authority: String,

@@ -1,36 +1,14 @@
-use futures::{future, TryFuture};
 use linkerd2_duplex::Duplex;
 use linkerd2_error::Error;
-use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tower::Service;
-
-pub fn forward<C>(connect: C) -> Forward<C> {
-    Forward { connect }
-}
+use tower::{Service, util::ServiceExt};
 
 #[derive(Clone, Debug)]
 pub struct Forward<C> {
     connect: C,
-}
-
-#[pin_project]
-pub struct ForwardFuture<I, F: TryFuture> {
-    #[pin]
-    state: ForwardState<I, F>,
-}
-
-#[pin_project(project = ForwardStateProj)]
-enum ForwardState<I, F: TryFuture> {
-    Connect {
-        #[pin]
-        connect: F,
-        io: Option<I>,
-    },
-    Duplex(#[pin] Duplex<I, F::Ok>),
 }
 
 impl<C> Forward<C> {
@@ -41,54 +19,38 @@ impl<C> Forward<C> {
 
 impl<C, T, I> Service<(T, I)> for Forward<C>
 where
-    C: Service<T>,
+    T: Send + 'static,
+    C: Service<T> + Clone + Send + 'static,
     C::Response: Send + 'static,
     C::Future: Send + 'static,
-    C::Error: Into<Error>,
+    C::Error: Into<Error> + Send,
     C::Response: AsyncRead + AsyncWrite + Unpin,
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    type Response = ForwardFuture<I, C::Future>;
+    type Response = ();
     type Error = Error;
-    type Future = future::Ready<Result<Self::Response, Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), self::Error>> {
-        self.connect.poll_ready(cx).map_err(Into::into)
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, (meta, io): (T, I)) -> Self::Future {
-        future::ok(ForwardFuture {
-            state: ForwardState::Connect {
-                io: Some(io),
-                connect: self.connect.call(meta),
-            },
+        let mut connect = self.connect.clone();
+        Box::pin(async move {
+            forward(&mut connect, meta, io).await
         })
     }
 }
 
-impl<I, F> Future for ForwardFuture<I, F>
+pub async fn forward<C, T, I>(connect: &mut C, target: T, src_io: I) -> Result<(), Error>
 where
-    I: AsyncRead + AsyncWrite + Unpin,
-    F: TryFuture,
-    F::Ok: AsyncRead + AsyncWrite + Unpin,
-    F::Error: Into<Error>,
+    C: Service<T> + 'static,
+    C::Response:  AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    C::Future: Send + 'static,
+    C::Error: Into<Error> + Send,
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    type Output = Result<(), Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        loop {
-            match this.state.as_mut().project() {
-                ForwardStateProj::Connect { connect, io } => {
-                    let client_io = futures::ready!(connect.try_poll(cx).map_err(Into::into))?;
-                    let server_io = io.take().expect("illegal state");
-                    let duplex = Duplex::new(server_io, client_io);
-                    this.state.set(ForwardState::Duplex(duplex))
-                }
-                ForwardStateProj::Duplex(fut) => {
-                    return fut.poll(cx).map_err(Into::into);
-                }
-            }
-        }
-    }
+    let dst_io = connect.ready_and().await.map_err(Into::into)?.call(target).await.map_err(Into::into)?;
+    Duplex::new(src_io, dst_io).await.map_err(Into::into)
 }
