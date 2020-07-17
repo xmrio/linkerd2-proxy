@@ -4,7 +4,13 @@ use futures::prelude::*;
 use http_body::Body as HttpBody;
 use linkerd2_error::{Error, Recover};
 use linkerd2_proxy_api::destination::{self as api, destination_client::DestinationClient};
-use std::{collections::HashMap, convert::TryFrom, net::SocketAddr};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    net::SocketAddr,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::sync::watch;
 use tonic::{
     self as grpc,
@@ -200,6 +206,32 @@ where
                 }
             }
         }
+    }
+}
+
+impl<S, R> tower::Service<SocketAddr> for Client<S, R>
+where
+    S: GrpcService<BoxBody> + Clone + Send + 'static,
+    S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Data: Send,
+    <S::ResponseBody as HttpBody>::Error:
+        Into<Box<dyn std::error::Error + Send + Sync + 'static>> + Send,
+    S::Future: Send,
+    R: Recover<grpc::Status> + Clone + Send + 'static,
+    R::Backoff: Send + Unpin,
+{
+    type Response = watch::Receiver<Strategy>;
+    type Error = Error;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<watch::Receiver<Strategy>, Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, addr: SocketAddr) -> Self::Future {
+        let mut client = self.clone();
+        Box::pin(async move { client.watch(addr).await })
     }
 }
 
