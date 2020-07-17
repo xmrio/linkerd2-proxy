@@ -41,9 +41,12 @@ pub enum Target {
     Concrete {
         authority: String,
         metric_labels: HashMap<String, String>,
-        profile: (),
+        // FIXME profile: ...,
     },
-    Logical {},
+    Logical {
+        metric_labels: HashMap<String, String>,
+        targets: Vec<(Target, u32)>,
+    },
 }
 
 pub type Init = (Strategy, grpc::codec::Streaming<api::StrategyResponse>);
@@ -217,30 +220,7 @@ impl Strategy {
             .unwrap_or(Detect::Client);
 
         let target = target
-            .and_then(|api::Target { kind }| {
-                kind.and_then(|k| match k {
-                    api::target::Kind::Endpoint(api::target::Endpoint { addr }) => {
-                        addr.and_then(|wa| {
-                            wa.addr
-                                .and_then(|a| SocketAddr::try_from(a).ok())
-                                .map(|addr| Target::Endpoint { addr })
-                        })
-                    }
-                    api::target::Kind::Concrete(api::target::Concrete {
-                        authority,
-                        metric_labels,
-                        profile: _,
-                    }) => Some(Target::Concrete {
-                        authority,
-                        metric_labels,
-                        profile: (),
-                    }),
-                    api::target::Kind::Logical(api::target::Logical {
-                        metric_labels: _,
-                        inner: _,
-                    }) => Some(Target::Logical {}),
-                })
-            })
+            .and_then(Target::new)
             .unwrap_or_else(|| Target::Endpoint { addr });
 
         Strategy {
@@ -248,5 +228,52 @@ impl Strategy {
             detect,
             target,
         }
+    }
+}
+
+impl Target {
+    fn new(api::Target { kind }: api::Target) -> Option<Self> {
+        let target = match kind? {
+            api::target::Kind::Endpoint(api::target::Endpoint { addr }) => {
+                let addr = SocketAddr::try_from(addr?.addr?).ok()?;
+                Self::Endpoint { addr }
+            }
+
+            api::target::Kind::Concrete(api::target::Concrete {
+                authority,
+                metric_labels,
+                profile: _, // FIXME
+            }) => Self::Concrete {
+                authority,
+                metric_labels,
+            },
+
+            api::target::Kind::Logical(api::target::Logical {
+                metric_labels,
+                inner,
+            }) => {
+                let api::target::logical::Inner::Split(split) = inner?;
+                let targets = split
+                    .targets
+                    .into_iter()
+                    .filter_map(|api::WeightedTarget { target, weight }| {
+                        if weight == 0 {
+                            return None;
+                        }
+                        let t = Target::new(target?)?;
+                        Some((t, weight))
+                    })
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    return None;
+                }
+                Self::Logical {
+                    metric_labels,
+                    targets,
+                }
+            }
+        };
+
+        Some(target)
     }
 }
