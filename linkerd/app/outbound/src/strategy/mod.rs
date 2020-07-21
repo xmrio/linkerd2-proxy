@@ -2,9 +2,11 @@ use futures::prelude::*;
 use linkerd2_app_core::{
     config::ProxyConfig,
     proxy::identity,
-    transport::{tls, BoxedIo},
+    timeout,
+    transport::{connect::connect, tls, BoxedIo},
     Error, ProxyMetrics,
 };
+use linkerd2_duplex::Duplex;
 use linkerd2_strategy::{Detect, Strategy, Target};
 use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
@@ -14,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{net::TcpStream, sync::watch};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct Router<S> {
@@ -89,10 +91,14 @@ impl tower::Service<TcpStream> for Accept {
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
                     Protocol::Unknown => {
-                        Self::proxy_tcp(config, strategy.addr, strategy.target, io).await
+                        if let Err(error) =
+                            Self::proxy_tcp(config, strategy.addr, strategy.target, io).await
+                        {
+                            debug!(%error, "TCP stream completed");
+                        }
                     }
-                    Protocol::Http1 => Self::proxy_http1(config, strategy, io).await,
-                    Protocol::H2 => Self::proxy_h2(config, strategy, io).await,
+                    Protocol::Http1 => unimplemented!("HTTP/1 proxy"),
+                    Protocol::H2 => unimplemented!("H2 proxy"),
                 }
             });
 
@@ -127,10 +133,16 @@ impl Accept {
         }
     }
 
-    async fn proxy_tcp(mut config: Config, addr: SocketAddr, mut target: Target, io: BoxedIo) {
+    async fn proxy_tcp(
+        mut config: Config,
+        addr: SocketAddr,
+        mut target: Target,
+        io: BoxedIo,
+    ) -> Result<(), Error> {
+        let connect_timeout = config.config.connect.timeout;
         loop {
             target = match target {
-                Target::Logical {
+                Target::LogicalSplit {
                     metric_labels,
                     targets,
                     weights,
@@ -146,53 +158,51 @@ impl Accept {
                 } => {
                     // TODO TCP discovery/balancing.
                     warn!("TCP load balancing not supported yet; forwarding");
-                    Target::Endpoint { addr }
+                    Target::Endpoint {
+                        addr,
+                        identity: None,
+                    }
                 }
 
-                Target::Endpoint { addr } => {
-                    use crate::endpoint::TcpEndpoint;
-                    use linkerd2_app_core::{proxy::tcp, svc};
-
-                    let Config {
-                        config,
-                        identity,
-                        .. // FIXME
-                    } = config;
-
-                    // Establishes connections to remote peers (for both TCP
-                    // forwarding and HTTP proxying).
-                    let mut connect = svc::connect(config.connect.keepalive)
-                        // Initiates mTLS if the target is configured with identity.
-                        .push(tls::client::ConnectLayer::new(identity))
-                        // Limits the time we wait for a connection to be established.
-                        .push_timeout(config.connect.timeout)
-                        //.push(metrics.transport.layer_connect(TransportLabels))
-                        // push(admit::AdmitLayer::new(PreventLoop::from(
-                        //     listen_addr.port(),
-                        // )))
-                        .push_map_target(|addr: SocketAddr| TcpEndpoint::from(addr))
-                        .into_inner();
-
-                    match tcp::forward::forward(&mut connect, addr, io).await {
-                        Ok(()) => {
-                            info!("TCP stream completed");
-                        }
-                        Err(error) => {
-                            info!(%error, "TCP stream completed");
-                        }
-                    }
-
-                    return;
+                Target::Endpoint { addr, identity } => {
+                    let id = identity.map(tls::Conditional::Some).unwrap_or_else(|| {
+                        tls::Conditional::None(
+                            tls::ReasonForNoPeerName::NotProvidedByServiceDiscovery.into(),
+                        )
+                    });
+                    let dst_io = Self::connect(config, addr, identity).await?
+                    Duplex::new(io, dst_io).await?;
+                    return Ok(());
                 }
             }
         }
     }
 
-    async fn proxy_http1(config: Config, strategy: Strategy, io: BoxedIo) {
-        unimplemented!("HTTP/1 proxy")
-    }
+    async fn connect(
+        Config {
+            config, identity, ..
+        }: Config,
+        addr: SocketAddr,
+        peer_identity: tls::PeerIdentity,
+    ) -> Result<BoxedIo, Error> {
+        let connect = {
+            let tcp = connect(addr, config.connect.keepalive).await?;
 
-    async fn proxy_h2(config: Config, strategy: Strategy, io: BoxedIo) {
-        unimplemented!("HTTP/2 proxy")
+            // TODO .push(metrics.transport.layer_connect(TransportLabels))
+            match (identity, peer_identity) {
+                (tls::Conditional::Some(key), tls::Conditional::Some(id)) => {
+                    let io = tls::client::handshake(&key, &id, tcp).await?;
+                    BoxedIo::new(io)
+                }
+                _ => BoxedIo::new(tcp),
+            }
+        };
+
+        futures::select_biased! {
+            () = tokio::time::delay_for(connect_timeout).fuse() => {
+                Err(timeout::error::ConnectTimeout::from(connect_timeout).into())
+            }
+            res = connect.fuse() => { res }
+        }
     }
 }

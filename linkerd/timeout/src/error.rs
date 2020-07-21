@@ -3,6 +3,9 @@
 use std::fmt;
 use std::time::Duration;
 
+#[derive(Debug)]
+pub struct ConnectTimeout(Duration);
+
 /// An error representing that an operation timed out.
 #[derive(Debug)]
 pub struct ResponseTimeout(pub(crate) Duration);
@@ -10,6 +13,22 @@ pub struct ResponseTimeout(pub(crate) Duration);
 /// A duration which pretty-prints as fractional seconds.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct HumanDuration<'a>(pub &'a Duration);
+
+// === impl ConnectTimeout ===
+
+impl From<Duration> for ConnectTimeout {
+    fn from(d: Duration) -> Self {
+        ConnectTimeout(d)
+    }
+}
+
+impl fmt::Display for ConnectTimeout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "connection timed out after {}", HumanDuration(&self.0))
+    }
+}
+
+impl std::error::Error for ConnectTimeout {}
 
 // === impl ResponseTimeout ===
 

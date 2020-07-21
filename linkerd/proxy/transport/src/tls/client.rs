@@ -34,13 +34,13 @@ pub struct ConnectFuture<L, F: TryFuture> {
     state: ConnectState<L, F>,
 }
 #[pin_project(project = ConnectStateProj)]
-enum ConnectState<L, F: TryFuture> {
+enum ConnectState<L, F> {
     Init {
         #[pin]
         future: F,
         tls: super::Conditional<(identity::Name, L)>,
     },
-    Handshake(#[pin] tokio_rustls::Connect<F::Ok>),
+    Handshake(#[pin] tokio_rustls::Connect<TcpStream>),
 }
 
 // === impl ConnectLayer ===
@@ -117,10 +117,7 @@ where
 
                     match tls {
                         Conditional::Some((peer_identity, local_tls)) => {
-                            trace!(peer.id = %peer_identity, "initiating TLS");
-                            let handshake =
-                                tokio_rustls::TlsConnector::from(local_tls.tls_client_config())
-                                    .connect(peer_identity.as_dns_name_ref(), io);
+                            let handshake = handshake(local_tls, peer_identity, io);
                             this.state.set(ConnectState::Handshake(handshake));
                         }
                         Conditional::None(reason) => {
@@ -137,6 +134,12 @@ where
             };
         }
     }
+}
+
+pub fn handshake<L: HasConfig>(local: &L, peer: &identity::Name, tcp: TcpStream) -> tokio_rustls::Connect<TcpStream> {
+    trace!(peer.id = %peer, "initiating TLS");
+    tokio_rustls::TlsConnector::from(local.tls_client_config())
+        .connect(peer.as_dns_name_ref(), tcp)
 }
 
 impl HasConfig for identity::CrtKey {

@@ -3,6 +3,19 @@ use std::{future::Future, io, net::SocketAddr, pin::Pin, time::Duration};
 use tokio::net::TcpStream;
 use tracing::debug;
 
+pub async fn connect(addr: SocketAddr, keepalive: Option<Duration>) -> io::Result<TcpStream> {
+    debug!(peer.addr = %addr, "Connecting");
+    let io = TcpStream::connect(&addr).await?;
+    super::set_nodelay_or_warn(&io);
+    super::set_keepalive_or_warn(&io, keepalive);
+    debug!(
+        local.addr = %io.local_addr().expect("cannot load local addr"),
+        ?keepalive,
+        "Connected",
+    );
+    Ok(io)
+}
+
 pub trait ConnectAddr {
     fn connect_addr(&self) -> SocketAddr;
 }
@@ -31,17 +44,6 @@ impl<C: ConnectAddr> tower::Service<C> for Connect {
     fn call(&mut self, c: C) -> Self::Future {
         let keepalive = self.keepalive;
         let addr = c.connect_addr();
-        debug!(peer.addr = %addr, "Connecting");
-        Box::pin(async move {
-            let io = TcpStream::connect(&addr).await?;
-            super::set_nodelay_or_warn(&io);
-            super::set_keepalive_or_warn(&io, keepalive);
-            debug!(
-                local.addr = %io.local_addr().expect("cannot load local addr"),
-                ?keepalive,
-                "Connected",
-            );
-            Ok(io)
-        })
+        Box::pin(connect(addr, keepalive))
     }
 }

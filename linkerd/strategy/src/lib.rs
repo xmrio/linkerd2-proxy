@@ -3,6 +3,7 @@
 use futures::prelude::*;
 use http_body::Body as HttpBody;
 use linkerd2_error::{Error, Recover};
+use linkerd2_identity as identity;
 use linkerd2_proxy_api::destination::{self as api, destination_client::DestinationClient};
 use rand::distributions::WeightedIndex;
 use std::{
@@ -44,14 +45,15 @@ pub enum Detect {
 pub enum Target {
     Endpoint {
         addr: SocketAddr,
-        // FIXME metadata, TLS...
+        identity: Option<identity::Name>,
+        // FIXME metadata
     },
     Concrete {
         authority: String,
         metric_labels: HashMap<String, String>,
         // FIXME profile: ...,
     },
-    Logical {
+    LogicalSplit {
         metric_labels: HashMap<String, String>,
         weights: WeightedIndex<u32>,
         targets: Vec<Target>,
@@ -243,7 +245,10 @@ impl Strategy {
 
         let target = target
             .and_then(Target::new)
-            .unwrap_or_else(|| Target::Endpoint { addr });
+            .unwrap_or_else(|| Target::Endpoint {
+                addr,
+                identity: None,
+            });
 
         Strategy {
             addr,
@@ -258,7 +263,10 @@ impl Target {
         let target = match kind? {
             api::target::Kind::Endpoint(api::target::Endpoint { addr }) => {
                 let addr = SocketAddr::try_from(addr?.addr?).ok()?;
-                Self::Endpoint { addr }
+                Self::Endpoint {
+                    addr,
+                    identity: None,
+                }
             }
 
             api::target::Kind::Concrete(api::target::Concrete {
@@ -289,7 +297,7 @@ impl Target {
 
                 // Returns None if weights is empty.
                 let weights = WeightedIndex::new(weights).ok()?;
-                Self::Logical {
+                Self::LogicalSplit {
                     metric_labels,
                     targets,
                     weights,
