@@ -8,11 +8,12 @@ use linkerd2_app_core::{
     Error, ProxyMetrics,
 };
 use linkerd2_duplex::Duplex;
-use linkerd2_strategy::{Detect, Strategy, Target};
+use linkerd2_strategy::{Detect, Endpoint, Strategy, Target};
 use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{io, net::TcpStream, sync::watch};
@@ -46,6 +47,8 @@ enum Protocol {
     H2,
 }
 
+// The router is shared and its responses are buffered/cached so that multiple
+// connections use the same accept object.
 impl<S> tower::Service<SocketAddr> for Router<S>
 where
     S: tower::Service<SocketAddr, Response = watch::Receiver<Strategy>>,
@@ -61,6 +64,7 @@ where
     }
 
     fn call(&mut self, target: SocketAddr) -> Self::Future {
+        // TODO dispatch timeout
         let strategy = self.get_strategy.call(target);
 
         let config = self.config.clone();
@@ -83,20 +87,25 @@ impl tower::Service<TcpStream> for Accept {
 
     fn call(&mut self, tcp: TcpStream) -> Self::Future {
         let config = self.config.clone();
-        let strategy = self.strategy.borrow().clone();
+        let strategy = self.strategy.clone();
 
         Box::pin(async move {
-            let (protocol, io) = Self::detect(strategy.detect, tcp).await?;
+            let detect = strategy.borrow().detect.clone();
+            let (protocol, io) = Self::detect(detect, tcp).await?;
 
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
                     Protocol::Unknown => {
-                        match Self::proxy_tcp(config, strategy.addr, strategy.target, io).await {
-                            Err(error) => info!(%error, "TCP stream completed"),
-                            Ok(()) => debug!("TCP stream completed"),
+                        // There's no need to watch for updates with TCP
+                        // streams, since the routing decision is made
+                        // instantaneously.
+                        let s = strategy.borrow().clone();
+                        match config.proxy_tcp(s, io).await {
+                            Err(error) => info!(%error, "Connection closed"),
+                            Ok(()) => debug!("Connection closed"),
                         }
                     }
-                    Protocol::Http1 => unimplemented!("HTTP/1 proxy"),
+                    Protocol::Http1 => config.proxy_http1(strategy, io).await,
                     Protocol::H2 => unimplemented!("H2 proxy"),
                 }
             });
@@ -117,7 +126,8 @@ impl Accept {
                 // TODO sniff  SNI.
 
                 // TODO take advantage TcpStream::peek to avoid allocating a buf
-                // per peek.
+                // per peek. A large buffer is needed, to fit the first line of
+                // an arbitrary HTTP message (i.e. with a long URI).
                 let io = tcp.peek(8192).await?;
 
                 let proto = Version::from_prefix(io.prefix().as_ref())
@@ -131,45 +141,48 @@ impl Accept {
             }
         }
     }
+}
 
+impl Config {
     async fn proxy_tcp(
-        mut config: Config,
-        addr: SocketAddr,
-        mut target: Target,
+        mut self,
+        Strategy {
+            addr, mut target, ..
+        }: Strategy,
         io: BoxedIo,
     ) -> Result<(), Error> {
         loop {
             target = match target {
-                Target::LogicalSplit {
-                    metric_labels,
-                    targets,
-                    weights,
-                } => {
-                    let idx = weights.sample(&mut config.rng);
-                    debug_assert!(idx < targets.len());
-                    targets[idx].clone()
+                Target::LogicalSplit(split) => {
+                    let idx = split.weights.sample(&mut self.rng);
+                    debug_assert!(idx < split.targets.len());
+                    split.targets[idx].clone()
                 }
 
-                Target::Concrete {
-                    authority,
-                    metric_labels,
-                } => {
+                Target::Concrete(concrete) => {
                     // TODO TCP discovery/balancing.
-                    warn!("TCP load balancing not supported yet; forwarding");
-                    Target::Endpoint {
+                    warn!(%concrete.authority, "TCP load balancing not supported yet; forwarding");
+                    Target::Endpoint(Arc::new(Endpoint {
                         addr,
                         identity: None,
-                    }
+                        metric_labels: Default::default(),
+                    }))
                 }
 
-                Target::Endpoint { addr, identity } => {
-                    let id = identity.map(tls::Conditional::Some).unwrap_or_else(|| {
-                        tls::Conditional::None(
-                            tls::ReasonForNoPeerName::NotProvidedByServiceDiscovery.into(),
-                        )
-                    });
-                    let dst_io = Self::connect(config, addr, id).await?;
+                Target::Endpoint(endpoint) => {
+                    let id = endpoint
+                        .identity
+                        .clone()
+                        .map(tls::Conditional::Some)
+                        .unwrap_or_else(|| {
+                            tls::Conditional::None(
+                                tls::ReasonForNoPeerName::NotProvidedByServiceDiscovery.into(),
+                            )
+                        });
+
+                    let dst_io = self.connect(addr, id).await?;
                     Duplex::new(io, dst_io).await?;
+
                     return Ok(());
                 }
             }
@@ -177,16 +190,18 @@ impl Accept {
     }
 
     async fn connect(
-        Config {
-            config,
-            identity,
-            metrics,
-            ..
-        }: Config,
+        self,
         addr: SocketAddr,
         peer_identity: tls::PeerIdentity,
     ) -> Result<impl io::AsyncRead + io::AsyncWrite + Send, Error> {
         use tower::{util::ServiceExt, Service};
+
+        let Self {
+            config,
+            identity,
+            metrics,
+            ..
+        } = self;
 
         let mut connect = svc::connect(config.connect.keepalive)
             // Initiates mTLS if the target is configured with identity.
@@ -201,6 +216,16 @@ impl Accept {
             identity: peer_identity,
         };
         let io = connect.ready_and().await?.call(endpoint).await?;
+
         Ok(io)
+    }
+
+    #[allow(warnings)]
+    async fn proxy_http1(mut self, strategy: watch::Receiver<Strategy>, io: BoxedIo) {
+        // TODO
+        // - create an HTTP server
+        // - dispatches to a service that holds the strategy watch...
+        // - buffered/cached...
+        unimplemented!();
     }
 }

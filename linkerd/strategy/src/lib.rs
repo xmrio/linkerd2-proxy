@@ -11,6 +11,7 @@ use std::{
     convert::TryFrom,
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::watch;
@@ -42,22 +43,32 @@ pub enum Detect {
 }
 
 #[derive(Clone, Debug)]
+pub struct Concrete {
+    pub authority: String,
+    pub metric_labels: HashMap<String, String>,
+    // FIXME profile: ...,
+}
+
+#[derive(Clone, Debug)]
+pub struct LogicalSplit {
+    pub metric_labels: HashMap<String, String>,
+    pub weights: WeightedIndex<u32>,
+    pub targets: Vec<Target>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Endpoint {
+    pub addr: SocketAddr,
+    pub identity: Option<identity::Name>,
+    pub metric_labels: HashMap<String, String>,
+    // FIXME metadata
+}
+
+#[derive(Clone, Debug)]
 pub enum Target {
-    Endpoint {
-        addr: SocketAddr,
-        identity: Option<identity::Name>,
-        // FIXME metadata
-    },
-    Concrete {
-        authority: String,
-        metric_labels: HashMap<String, String>,
-        // FIXME profile: ...,
-    },
-    LogicalSplit {
-        metric_labels: HashMap<String, String>,
-        weights: WeightedIndex<u32>,
-        targets: Vec<Target>,
-    },
+    Endpoint(Arc<Endpoint>),
+    Concrete(Arc<Concrete>),
+    LogicalSplit(Arc<LogicalSplit>),
 }
 
 pub type Init = (Strategy, grpc::codec::Streaming<api::StrategyResponse>);
@@ -243,12 +254,13 @@ impl Strategy {
             })
             .unwrap_or(Detect::Client);
 
-        let target = target
-            .and_then(Target::new)
-            .unwrap_or_else(|| Target::Endpoint {
+        let target = target.and_then(Target::new).unwrap_or_else(|| {
+            Target::Endpoint(Arc::new(Endpoint {
                 addr,
                 identity: None,
-            });
+                metric_labels: Default::default(),
+            }))
+        });
 
         Strategy {
             addr,
@@ -263,21 +275,23 @@ impl Target {
         let target = match kind? {
             api::target::Kind::Endpoint(api::target::Endpoint { addr }) => {
                 let addr = SocketAddr::try_from(addr?.addr?).ok()?;
-                Self::Endpoint {
+                Self::Endpoint(Arc::new(Endpoint {
                     addr,
+                    // FIXME
                     identity: None,
-                }
+                    metric_labels: Default::default(),
+                }))
             }
 
             api::target::Kind::Concrete(api::target::Concrete {
                 authority,
                 metric_labels,
                 profile: _, // FIXME
-            }) => Self::Concrete {
+            }) => Self::Concrete(Arc::new(Concrete {
                 authority,
                 metric_labels,
-            },
-
+                // FIXME profile
+            })),
             api::target::Kind::Logical(api::target::Logical {
                 metric_labels,
                 inner,
@@ -297,11 +311,11 @@ impl Target {
 
                 // Returns None if weights is empty.
                 let weights = WeightedIndex::new(weights).ok()?;
-                Self::LogicalSplit {
+                Self::LogicalSplit(Arc::new(LogicalSplit {
                     metric_labels,
                     targets,
                     weights,
-                }
+                }))
             }
         };
 
