@@ -11,24 +11,7 @@
 // };
 // use ::http::header::HOST;
 // use futures::{future, prelude::*};
-// use linkerd2_app_core::{
-//     admit, classify,
-//     config::{ProxyConfig, ServerConfig},
-//     dns, drain, dst, errors, metric_labels,
-//     opencensus::proto::trace::v1 as oc,
-//     profiles,
-//     proxy::{
-//         self, core::resolve::Resolve, detect::DetectProtocolLayer, discover, http, identity,
-//         resolve::map_endpoint, server::ProtocolDetect, tap, tcp, Server,
-//     },
-//     reconnect, retry, router, serve,
-//     spans::SpanConverter,
-//     svc::{self, NewService},
-//     transport::{self, tls},
-//     Conditional, DiscoveryRejected, Error, ProxyMetrics, StackMetrics, TraceContextLayer,
-//     CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID,
-//     L5D_SERVER_ID,
-// };
+use linkerd2_app_core::transport;
 // use std::collections::HashMap;
 // use std::net::IpAddr;
 // use std::time::Duration;
@@ -551,8 +534,8 @@ mod strategy;
 //     metric_labels::StackLabels::outbound(name)
 // }
 
-// #[derive(Copy, Clone, Debug)]
-// struct TransportLabels;
+#[derive(Copy, Clone, Debug)]
+struct TransportLabels;
 
 // impl transport::metrics::TransportLabels<Target<HttpEndpoint>> for TransportLabels {
 //     type Labels = transport::labels::Key;
@@ -562,13 +545,13 @@ mod strategy;
 //     }
 // }
 
-// impl transport::metrics::TransportLabels<TcpEndpoint> for TransportLabels {
-//     type Labels = transport::labels::Key;
+impl transport::metrics::TransportLabels<endpoint::TcpEndpoint> for TransportLabels {
+    type Labels = transport::labels::Key;
 
-//     fn transport_labels(&self, endpoint: &TcpEndpoint) -> Self::Labels {
-//         transport::labels::Key::connect("outbound", endpoint.identity.as_ref())
-//     }
-// }
+    fn transport_labels(&self, endpoint: &endpoint::TcpEndpoint) -> Self::Labels {
+        transport::labels::Key::connect("outbound", endpoint.identity.as_ref())
+    }
+}
 
 // impl transport::metrics::TransportLabels<proxy::server::Protocol> for TransportLabels {
 //     type Labels = transport::labels::Key;

@@ -1,22 +1,22 @@
+use crate::endpoint::TcpEndpoint;
 use futures::prelude::*;
 use linkerd2_app_core::{
     config::ProxyConfig,
     proxy::identity,
-    timeout,
-    transport::{connect::connect, tls, BoxedIo},
+    svc,
+    transport::{tls, BoxedIo},
     Error, ProxyMetrics,
 };
 use linkerd2_duplex::Duplex;
 use linkerd2_strategy::{Detect, Strategy, Target};
 use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
-    io,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::{net::TcpStream, sync::watch};
-use tracing::{debug, warn};
+use tokio::{io, net::TcpStream, sync::watch};
+use tracing::{debug, info, warn};
 
 #[derive(Clone)]
 pub struct Router<S> {
@@ -91,10 +91,9 @@ impl tower::Service<TcpStream> for Accept {
             let rsp: Self::Response = Box::pin(async move {
                 match protocol {
                     Protocol::Unknown => {
-                        if let Err(error) =
-                            Self::proxy_tcp(config, strategy.addr, strategy.target, io).await
-                        {
-                            debug!(%error, "TCP stream completed");
+                        match Self::proxy_tcp(config, strategy.addr, strategy.target, io).await {
+                            Err(error) => info!(%error, "TCP stream completed"),
+                            Ok(()) => debug!("TCP stream completed"),
                         }
                     }
                     Protocol::Http1 => unimplemented!("HTTP/1 proxy"),
@@ -139,7 +138,6 @@ impl Accept {
         mut target: Target,
         io: BoxedIo,
     ) -> Result<(), Error> {
-        let connect_timeout = config.config.connect.timeout;
         loop {
             target = match target {
                 Target::LogicalSplit {
@@ -170,7 +168,7 @@ impl Accept {
                             tls::ReasonForNoPeerName::NotProvidedByServiceDiscovery.into(),
                         )
                     });
-                    let dst_io = Self::connect(config, addr, identity).await?
+                    let dst_io = Self::connect(config, addr, id).await?;
                     Duplex::new(io, dst_io).await?;
                     return Ok(());
                 }
@@ -180,29 +178,29 @@ impl Accept {
 
     async fn connect(
         Config {
-            config, identity, ..
+            config,
+            identity,
+            metrics,
+            ..
         }: Config,
         addr: SocketAddr,
         peer_identity: tls::PeerIdentity,
-    ) -> Result<BoxedIo, Error> {
-        let connect = {
-            let tcp = connect(addr, config.connect.keepalive).await?;
+    ) -> Result<impl io::AsyncRead + io::AsyncWrite + Send, Error> {
+        use tower::{util::ServiceExt, Service};
 
-            // TODO .push(metrics.transport.layer_connect(TransportLabels))
-            match (identity, peer_identity) {
-                (tls::Conditional::Some(key), tls::Conditional::Some(id)) => {
-                    let io = tls::client::handshake(&key, &id, tcp).await?;
-                    BoxedIo::new(io)
-                }
-                _ => BoxedIo::new(tcp),
-            }
+        let mut connect = svc::connect(config.connect.keepalive)
+            // Initiates mTLS if the target is configured with identity.
+            .push(tls::client::ConnectLayer::new(identity))
+            // Limits the time we wait for a connection to be established.
+            .push_timeout(config.connect.timeout)
+            .push(metrics.transport.layer_connect(crate::TransportLabels))
+            .into_inner();
+
+        let endpoint = TcpEndpoint {
+            addr,
+            identity: peer_identity,
         };
-
-        futures::select_biased! {
-            () = tokio::time::delay_for(connect_timeout).fuse() => {
-                Err(timeout::error::ConnectTimeout::from(connect_timeout).into())
-            }
-            res = connect.fuse() => { res }
-        }
+        let io = connect.ready_and().await?.call(endpoint).await?;
+        Ok(io)
     }
 }
