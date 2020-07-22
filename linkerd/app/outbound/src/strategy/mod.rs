@@ -299,13 +299,17 @@ impl Accept {
     async fn http_service(
         &self,
     ) -> buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>> {
-        let opt = self.http.lock().await;
+        let mut cache = self.http.lock().await;
 
-        if let Some(ref buffer) = *opt {
+        if let Some(ref buffer) = *cache {
             return buffer.clone();
         }
 
-        unimplemented!()
+        let (buffer, task) = buffer::new(HttpService(self.strategy.clone()),self.inner.config.buffer_capacity, None);
+        tokio::spawn(task);
+        *cache = Some(buffer.clone());
+
+        buffer
     }
 }
 

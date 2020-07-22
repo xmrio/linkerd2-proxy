@@ -18,7 +18,7 @@ struct InFlight<Req, Rsp> {
     >,
 }
 
-pub(crate) fn new<Req, S>(
+pub fn new<Req, S>(
     inner: S,
     capacity: usize,
     idle_timeout: Option<Duration>,
