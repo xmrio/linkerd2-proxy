@@ -305,7 +305,11 @@ impl Accept {
             return buffer.clone();
         }
 
-        let (buffer, task) = buffer::new(HttpService(self.strategy.clone()),self.inner.config.buffer_capacity, None);
+        let (buffer, task) = buffer::new(
+            HttpService(self.strategy.clone()),
+            self.inner.config.buffer_capacity,
+            None,
+        );
         tokio::spawn(task);
         *cache = Some(buffer.clone());
 

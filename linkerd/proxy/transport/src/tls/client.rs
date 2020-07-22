@@ -136,10 +136,13 @@ where
     }
 }
 
-pub fn handshake<L: HasConfig>(local: &L, peer: &identity::Name, tcp: TcpStream) -> tokio_rustls::Connect<TcpStream> {
+pub fn handshake<L: HasConfig>(
+    local: &L,
+    peer: &identity::Name,
+    tcp: TcpStream,
+) -> tokio_rustls::Connect<TcpStream> {
     trace!(peer.id = %peer, "initiating TLS");
-    tokio_rustls::TlsConnector::from(local.tls_client_config())
-        .connect(peer.as_dns_name_ref(), tcp)
+    tokio_rustls::TlsConnector::from(local.tls_client_config()).connect(peer.as_dns_name_ref(), tcp)
 }
 
 impl HasConfig for identity::CrtKey {
