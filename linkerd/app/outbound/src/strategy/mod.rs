@@ -105,23 +105,22 @@ impl tower::Service<TcpStream> for Accept {
                 },
             };
 
-            match (protocol, io) {
+            let res = match (protocol, io) {
                 (Protocol::Unknown, io) => {
                     // There's no need to watch for updates with TCP
                     // streams, since the routing decision is made
                     // instantaneously.
-                    match inner.proxy_tcp(strategy, io).await {
-                        Err(error) => info!(%error, "Connection closed"),
-                        Ok(()) => debug!("Connection closed"),
-                    }
+                    inner.proxy_tcp(strategy, io).await
                 }
-                (Protocol::Http(version), io) => {
-                    // bleh
-                    match version {
-                        http::Version::Http1 => inner.proxy_http1(strategy_rx, io).await,
-                        http::Version::H2 => unimplemented!("H2 proxy"),
-                    }
-                }
+                (Protocol::Http(version), io) => match version {
+                    http::Version::Http1 => inner.proxy_http1(strategy_rx, io).await,
+                    http::Version::H2 => inner.proxy_h2(strategy_rx, io).await,
+                },
+            };
+
+            match res {
+                Err(error) => info!(%error, "Connection closed"),
+                Ok(()) => debug!("Connection closed"),
             }
 
             Ok(())
@@ -224,36 +223,73 @@ impl Inner {
         Ok(io)
     }
 
-    #[allow(warnings)]
-    async fn proxy_http1(self, strategy: watch::Receiver<Strategy>, io: BoxedIo) {
+    async fn proxy_http1(
+        self,
+        strategy: watch::Receiver<Strategy>,
+        io: BoxedIo,
+    ) -> Result<(), Error> {
         // TODO
         // - create an HTTP server
         // - dispatches to a service that holds the strategy watch...
         // - buffered/cached...
-        let http_service = self.http_service().await;
+        let http_service = self.http_service(strategy).await;
 
         let mut conn = hyper::server::conn::Http::new()
             .with_executor(http::trace::Executor::new())
             .http1_only(true)
-            .serve_connection(io, http_service)
+            .serve_connection(
+                io,
+                http::glue::HyperServerSvc::new(http::upgrade::Service::new(
+                    http_service,
+                    self.drain.clone(),
+                )),
+            )
             .with_upgrades();
 
-        let res = tokio::select! {
-            res = &mut conn => { res }
+        tokio::select! {
+            res = &mut conn => { res.map_err(Into::into) }
             handle = self.drain.signal() => {
-                handle.release_after(conn).await
+                Pin::new(&mut conn).graceful_shutdown();
+                handle.release_after(conn).await.map_err(Into::into)
             }
-        };
-        match res {
-            Err(error) => info!(%error, "Connection closed"),
-            Ok(()) => info!("Connection closed"),
+        }
+    }
+
+    async fn proxy_h2(self, strategy: watch::Receiver<Strategy>, io: BoxedIo) -> Result<(), Error> {
+        // TODO
+        // - create an HTTP server
+        // - dispatches to a service that holds the strategy watch...
+        // - buffered/cached...
+        let http_service = self.http_service(strategy).await;
+
+        let mut conn = hyper::server::conn::Http::new()
+            .with_executor(http::trace::Executor::new())
+            .http2_only(true)
+            .http2_initial_stream_window_size(
+                self.config.server.h2_settings.initial_stream_window_size,
+            )
+            .http2_initial_connection_window_size(
+                self.config
+                    .server
+                    .h2_settings
+                    .initial_connection_window_size,
+            )
+            .serve_connection(io, http::glue::HyperServerSvc::new(http_service));
+
+        tokio::select! {
+            res = &mut conn => { res.map_err(Into::into) }
+            handle = self.drain.signal() => {
+                Pin::new(&mut conn).graceful_shutdown();
+                handle.release_after(conn).await.map_err(Into::into)
+            }
         }
     }
 
     async fn http_service(
         &self,
+        _strategy: watch::Receiver<Strategy>,
     ) -> impl tower::Service<
-        http::Request<hyper::Body>,
+        http::Request<http::Body>,
         Response = http::Response<http::boxed::Payload>,
         Error = Error,
         Future = Pin<
@@ -264,14 +300,14 @@ impl Inner {
             >,
         >,
     > + Send {
-        // Todo cache the service
+        // TODO cache the service
         HttpService
     }
 }
 
 struct HttpService;
 
-impl tower::Service<http::Request<hyper::Body>> for HttpService {
+impl tower::Service<http::Request<http::Body>> for HttpService {
     type Response = http::Response<http::boxed::Payload>;
     type Error = Error;
     type Future = Pin<
@@ -286,7 +322,7 @@ impl tower::Service<http::Request<hyper::Body>> for HttpService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: http::Request<hyper::Body>) -> Self::Future {
+    fn call(&mut self, req: http::Request<http::Body>) -> Self::Future {
         Box::pin(async move {
             let _ = req;
             unimplemented!();
