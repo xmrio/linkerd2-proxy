@@ -909,6 +909,7 @@ dependencies = [
  "bytes 0.5.4",
  "futures 0.3.5",
  "http 0.2.1",
+ "hyper",
  "indexmap",
  "linkerd2-app-core",
  "linkerd2-duplex",

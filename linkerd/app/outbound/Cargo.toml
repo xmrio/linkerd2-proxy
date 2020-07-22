@@ -11,6 +11,7 @@ Configures and runs the outbound proxy
 [dependencies]
 bytes = "0.5"
 http = "0.2"
+hyper = "0.13"
 futures = "0.3"
 indexmap = "1.0"
 linkerd2-app-core = { path = "../core" }
