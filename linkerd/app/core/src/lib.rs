@@ -11,6 +11,7 @@
 
 pub use linkerd2_addr::{self as addr, Addr, NameAddr};
 pub use linkerd2_admit as admit;
+pub use linkerd2_buffer as buffer;
 pub use linkerd2_cache as cache;
 pub use linkerd2_conditional::Conditional;
 pub use linkerd2_drain as drain;

@@ -1,6 +1,7 @@
 use crate::endpoint::TcpEndpoint;
 use futures::prelude::*;
 use linkerd2_app_core::{
+    buffer,
     config::ProxyConfig,
     drain,
     proxy::{http, identity},
@@ -17,7 +18,11 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{io, net::TcpStream, sync::watch};
+use tokio::{
+    io,
+    net::TcpStream,
+    sync::{watch, Mutex},
+};
 use tracing::{debug, info, warn};
 
 #[derive(Clone)]
@@ -30,6 +35,11 @@ pub struct Router<S> {
 pub struct Accept {
     strategy: watch::Receiver<Strategy>,
     inner: Inner,
+    http: Arc<
+        Mutex<
+            Option<buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>>>,
+        >,
+    >,
 }
 
 #[derive(Clone)]
@@ -72,7 +82,11 @@ where
         Box::pin(async move {
             let strategy = strategy.await?;
 
-            return Ok(Accept { inner, strategy });
+            return Ok(Accept {
+                inner,
+                strategy,
+                http: Arc::new(Mutex::new(None)),
+            });
         })
     }
 }
@@ -87,34 +101,24 @@ impl tower::Service<TcpStream> for Accept {
     }
 
     fn call(&mut self, tcp: TcpStream) -> Self::Future {
-        let inner = self.inner.clone();
-        let strategy_rx = self.strategy.clone();
+        let accept = self.clone();
 
         Box::pin(async move {
-            let strategy = strategy_rx.borrow().clone();
-
             // TODO metrics...
-            let (protocol, io) = match strategy.detect {
-                Detect::Opaque => (Protocol::Unknown, BoxedIo::new(tcp)),
-                Detect::Client => match inner.detect(tcp).await {
-                    Err(error) => {
-                        info!(%error, "Protocol detection error");
-                        return Ok(());
-                    }
-                    Ok((protocol, io)) => (protocol, io),
-                },
+
+            let (protocol, io) = match accept.detect(tcp).await {
+                Err(error) => {
+                    info!(%error, "Protocol detection error");
+                    return Ok(());
+                }
+                Ok((protocol, io)) => (protocol, io),
             };
 
             let res = match (protocol, io) {
-                (Protocol::Unknown, io) => {
-                    // There's no need to watch for updates with TCP
-                    // streams, since the routing decision is made
-                    // instantaneously.
-                    inner.proxy_tcp(strategy, io).await
-                }
+                (Protocol::Unknown, io) => accept.proxy_tcp(io).await,
                 (Protocol::Http(version), io) => match version {
-                    http::Version::Http1 => inner.proxy_http1(strategy_rx, io).await,
-                    http::Version::H2 => inner.proxy_h2(strategy_rx, io).await,
+                    http::Version::Http1 => accept.proxy_http1(io).await,
+                    http::Version::H2 => accept.proxy_h2(io).await,
                 },
             };
 
@@ -128,17 +132,23 @@ impl tower::Service<TcpStream> for Accept {
     }
 }
 
-impl Inner {
+impl Accept {
     async fn detect(&self, tcp: TcpStream) -> Result<(Protocol, BoxedIo), Error> {
         use linkerd2_app_core::transport::io::Peekable;
 
+        if let Detect::Opaque = self.strategy.borrow().detect {
+            return Ok((Protocol::Unknown, BoxedIo::new(tcp)));
+        }
+
         // TODO sniff  SNI.
 
-        // TODO take advantage TcpStream::peek to avoid allocating a buf
-        // per peek. A large buffer is needed, to fit the first line of
-        // an arbitrary HTTP message (i.e. with a long URI).
-        let io =
-            tokio::time::timeout(self.config.detect_protocol_timeout, tcp.peek(8192)).await??;
+        // TODO take advantage TcpStream::peek to avoid allocating a buf per
+        // peek.
+        //
+        // A large buffer is needed, to fit the first line of an arbitrary HTTP
+        // message (i.e. with a long URI).
+        let peek = tcp.peek(8192);
+        let io = tokio::time::timeout(self.inner.config.detect_protocol_timeout, peek).await??;
 
         let proto = http::Version::from_prefix(io.prefix().as_ref())
             .map(Protocol::Http)
@@ -147,17 +157,17 @@ impl Inner {
         Ok((proto, BoxedIo::new(io)))
     }
 
-    async fn proxy_tcp(
-        mut self,
-        Strategy {
+    async fn proxy_tcp(mut self, io: BoxedIo) -> Result<(), Error> {
+        // There's no need to watch for updates with TCP streams, since the routing decision is made
+        // instantaneously.
+        let Strategy {
             addr, mut target, ..
-        }: Strategy,
-        io: BoxedIo,
-    ) -> Result<(), Error> {
+        } = self.strategy.borrow().clone();
+
         loop {
             target = match target {
                 Target::LogicalSplit(split) => {
-                    let idx = split.weights.sample(&mut self.rng);
+                    let idx = split.weights.sample(&mut self.inner.rng);
                     debug_assert!(idx < split.targets.len());
                     split.targets[idx].clone()
                 }
@@ -199,12 +209,12 @@ impl Inner {
     ) -> Result<impl io::AsyncRead + io::AsyncWrite + Send, Error> {
         use tower::{util::ServiceExt, Service};
 
-        let Self {
+        let Inner {
             config,
             identity,
             metrics,
             ..
-        } = self;
+        } = self.inner;
 
         let mut connect = svc::connect(config.connect.keepalive)
             // Initiates mTLS if the target is configured with identity.
@@ -223,16 +233,12 @@ impl Inner {
         Ok(io)
     }
 
-    async fn proxy_http1(
-        self,
-        strategy: watch::Receiver<Strategy>,
-        io: BoxedIo,
-    ) -> Result<(), Error> {
+    async fn proxy_http1(self, io: BoxedIo) -> Result<(), Error> {
         // TODO
         // - create an HTTP server
         // - dispatches to a service that holds the strategy watch...
         // - buffered/cached...
-        let http_service = self.http_service(strategy).await;
+        let http_service = self.http_service().await;
 
         let mut conn = hyper::server::conn::Http::new()
             .with_executor(http::trace::Executor::new())
@@ -241,35 +247,40 @@ impl Inner {
                 io,
                 http::glue::HyperServerSvc::new(http::upgrade::Service::new(
                     http_service,
-                    self.drain.clone(),
+                    self.inner.drain.clone(),
                 )),
             )
             .with_upgrades();
 
         tokio::select! {
             res = &mut conn => { res.map_err(Into::into) }
-            handle = self.drain.signal() => {
+            handle = self.inner.drain.signal() => {
                 Pin::new(&mut conn).graceful_shutdown();
                 handle.release_after(conn).await.map_err(Into::into)
             }
         }
     }
 
-    async fn proxy_h2(self, strategy: watch::Receiver<Strategy>, io: BoxedIo) -> Result<(), Error> {
+    async fn proxy_h2(self, io: BoxedIo) -> Result<(), Error> {
         // TODO
         // - create an HTTP server
         // - dispatches to a service that holds the strategy watch...
         // - buffered/cached...
-        let http_service = self.http_service(strategy).await;
+        let http_service = self.http_service().await;
 
         let mut conn = hyper::server::conn::Http::new()
             .with_executor(http::trace::Executor::new())
             .http2_only(true)
             .http2_initial_stream_window_size(
-                self.config.server.h2_settings.initial_stream_window_size,
+                self.inner
+                    .config
+                    .server
+                    .h2_settings
+                    .initial_stream_window_size,
             )
             .http2_initial_connection_window_size(
-                self.config
+                self.inner
+                    .config
                     .server
                     .h2_settings
                     .initial_connection_window_size,
@@ -278,7 +289,7 @@ impl Inner {
 
         tokio::select! {
             res = &mut conn => { res.map_err(Into::into) }
-            handle = self.drain.signal() => {
+            handle = self.inner.drain.signal() => {
                 Pin::new(&mut conn).graceful_shutdown();
                 handle.release_after(conn).await.map_err(Into::into)
             }
@@ -287,25 +298,19 @@ impl Inner {
 
     async fn http_service(
         &self,
-        _strategy: watch::Receiver<Strategy>,
-    ) -> impl tower::Service<
-        http::Request<http::Body>,
-        Response = http::Response<http::boxed::Payload>,
-        Error = Error,
-        Future = Pin<
-            Box<
-                dyn Future<Output = Result<http::Response<http::boxed::Payload>, Error>>
-                    + Send
-                    + 'static,
-            >,
-        >,
-    > + Send {
-        // TODO cache the service
-        HttpService
+    ) -> buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>> {
+        let opt = self.http.lock().await;
+
+        if let Some(ref buffer) = *opt {
+            return buffer.clone();
+        }
+
+        unimplemented!()
     }
 }
 
-struct HttpService;
+#[derive(Clone, Debug)]
+struct HttpService(watch::Receiver<Strategy>);
 
 impl tower::Service<http::Request<http::Body>> for HttpService {
     type Response = http::Response<http::boxed::Payload>;
