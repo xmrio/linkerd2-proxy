@@ -5,7 +5,7 @@ use linkerd2_app_core::{
     proxy::identity,
     svc,
     transport::{tls, BoxedIo},
-    Error, ProxyMetrics,
+    Error, Never, ProxyMetrics,
 };
 use linkerd2_duplex::Duplex;
 use linkerd2_strategy::{Detect, Endpoint, Strategy, Target};
@@ -77,73 +77,74 @@ where
 }
 
 impl tower::Service<TcpStream> for Accept {
-    type Response = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-    type Error = io::Error;
-    type Future = Pin<Box<dyn Future<Output = io::Result<Self::Response>> + Send + 'static>>;
+    type Response = ();
+    type Error = Never;
+    type Future = Pin<Box<dyn Future<Output = Result<(), Never>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Never>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, tcp: TcpStream) -> Self::Future {
         let config = self.config.clone();
-        let strategy = self.strategy.clone();
+        let strategy_rx = self.strategy.clone();
 
         Box::pin(async move {
-            let detect = strategy.borrow().detect.clone();
-            let (protocol, io) = Self::detect(detect, tcp).await?;
+            let strategy = strategy_rx.borrow().clone();
 
-            let rsp: Self::Response = Box::pin(async move {
-                match protocol {
-                    Protocol::Unknown => {
-                        // There's no need to watch for updates with TCP
-                        // streams, since the routing decision is made
-                        // instantaneously.
-                        let s = strategy.borrow().clone();
-                        match config.proxy_tcp(s, io).await {
-                            Err(error) => info!(%error, "Connection closed"),
-                            Ok(()) => debug!("Connection closed"),
-                        }
+            // TODO metrics...
+            let (protocol, io) = match strategy.detect {
+                Detect::Opaque => (Protocol::Unknown, BoxedIo::new(tcp)),
+                Detect::Client => match config.detect(tcp).await {
+                    Err(error) => {
+                        info!(%error, "Protocol detection error");
+                        return Ok(());
                     }
-                    Protocol::Http1 => config.proxy_http1(strategy, io).await,
-                    Protocol::H2 => unimplemented!("H2 proxy"),
-                }
-            });
+                    Ok((protocol, io)) => (protocol, io),
+                },
+            };
 
-            Ok(rsp)
+            match (protocol, io) {
+                (Protocol::Unknown, io) => {
+                    // There's no need to watch for updates with TCP
+                    // streams, since the routing decision is made
+                    // instantaneously.
+                    match config.proxy_tcp(strategy, io).await {
+                        Err(error) => info!(%error, "Connection closed"),
+                        Ok(()) => debug!("Connection closed"),
+                    }
+                }
+                (Protocol::Http1, io) => config.proxy_http1(strategy_rx, io).await,
+                (Protocol::H2, _io) => unimplemented!("H2 proxy"),
+            }
+
+            Ok(())
         })
     }
 }
 
-#[allow(unused_variables)]
-impl Accept {
-    async fn detect(detect: Detect, tcp: TcpStream) -> io::Result<(Protocol, BoxedIo)> {
-        match detect {
-            Detect::Opaque => Ok((Protocol::Unknown, BoxedIo::new(tcp))),
-            Detect::Client => {
-                use linkerd2_app_core::{proxy::http::Version, transport::io::Peekable};
-
-                // TODO sniff  SNI.
-
-                // TODO take advantage TcpStream::peek to avoid allocating a buf
-                // per peek. A large buffer is needed, to fit the first line of
-                // an arbitrary HTTP message (i.e. with a long URI).
-                let io = tcp.peek(8192).await?;
-
-                let proto = Version::from_prefix(io.prefix().as_ref())
-                    .map(|v| match v {
-                        Version::Http1 => Protocol::Http1,
-                        Version::H2 => Protocol::H2,
-                    })
-                    .unwrap_or(Protocol::Unknown);
-
-                Ok((proto, BoxedIo::new(io)))
-            }
-        }
-    }
-}
-
 impl Config {
+    async fn detect(&self, tcp: TcpStream) -> Result<(Protocol, BoxedIo), Error> {
+        use linkerd2_app_core::{proxy::http::Version, transport::io::Peekable};
+
+        // TODO sniff  SNI.
+
+        // TODO take advantage TcpStream::peek to avoid allocating a buf
+        // per peek. A large buffer is needed, to fit the first line of
+        // an arbitrary HTTP message (i.e. with a long URI).
+        let io =
+            tokio::time::timeout(self.config.detect_protocol_timeout, tcp.peek(8192)).await??;
+
+        let proto = Version::from_prefix(io.prefix().as_ref())
+            .map(|v| match v {
+                Version::Http1 => Protocol::Http1,
+                Version::H2 => Protocol::H2,
+            })
+            .unwrap_or(Protocol::Unknown);
+
+        Ok((proto, BoxedIo::new(io)))
+    }
+
     async fn proxy_tcp(
         mut self,
         Strategy {
