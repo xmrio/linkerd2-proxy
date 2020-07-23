@@ -13,6 +13,7 @@ use linkerd2_duplex::Duplex;
 use linkerd2_strategy::{Detect, Endpoint, Strategy, Target};
 use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
@@ -23,6 +24,7 @@ use tokio::{
     net::TcpStream,
     sync::{watch, Mutex},
 };
+use tower::{util::ServiceExt, Service};
 use tracing::{debug, info, warn};
 
 #[derive(Clone)]
@@ -31,15 +33,13 @@ pub struct Router<S> {
     inner: Inner,
 }
 
+type BufferedHttp = buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>>;
+
 #[derive(Clone)]
 pub struct Accept {
     strategy: watch::Receiver<Strategy>,
     inner: Inner,
-    http: Arc<
-        Mutex<
-            Option<buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>>>,
-        >,
-    >,
+    http: Arc<Mutex<Option<BufferedHttp>>>,
 }
 
 #[derive(Clone)]
@@ -60,9 +60,9 @@ enum Protocol {
 
 // The router is shared and its responses are buffered/cached so that multiple
 // connections use the same accept object.
-impl<S> tower::Service<SocketAddr> for Router<S>
+impl<S> Service<SocketAddr> for Router<S>
 where
-    S: tower::Service<SocketAddr, Response = watch::Receiver<Strategy>>,
+    S: Service<SocketAddr, Response = watch::Receiver<Strategy>> + Clone + Send + 'static,
     S::Error: Into<Error>,
     S::Future: Send + 'static,
 {
@@ -70,28 +70,27 @@ where
     type Error = S::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Accept, S::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
-        self.get_strategy.poll_ready(cx)
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, target: SocketAddr) -> Self::Future {
-        // TODO dispatch timeout
-        let strategy = self.get_strategy.call(target);
+        let mut get_strategy = self.get_strategy.clone();
 
         let inner = self.inner.clone();
         Box::pin(async move {
-            let strategy = strategy.await?;
-
+            let svc = get_strategy.ready_and().await?;
+            let strategy = svc.call(target).await?;
             return Ok(Accept {
                 inner,
                 strategy,
-                http: Arc::new(Mutex::new(None)),
+                http: Arc::new(Mutex::new(None as Option<BufferedHttp>)),
             });
         })
     }
 }
 
-impl tower::Service<TcpStream> for Accept {
+impl Service<TcpStream> for Accept {
     type Response = ();
     type Error = Never;
     type Future = Pin<Box<dyn Future<Output = Result<(), Never>> + Send + 'static>>;
@@ -116,7 +115,7 @@ impl tower::Service<TcpStream> for Accept {
 
             let res = match (protocol, io) {
                 (Protocol::Unknown, io) => accept.proxy_tcp(io).await,
-                (Protocol::Http(version), io) => match version {
+                (Protocol::Http(v), io) => match v {
                     http::Version::Http1 => accept.proxy_http1(io).await,
                     http::Version::H2 => accept.proxy_h2(io).await,
                 },
@@ -207,8 +206,6 @@ impl Accept {
         addr: SocketAddr,
         peer_identity: tls::PeerIdentity,
     ) -> Result<impl io::AsyncRead + io::AsyncWrite + Send, Error> {
-        use tower::{util::ServiceExt, Service};
-
         let Inner {
             config,
             identity,
@@ -296,20 +293,19 @@ impl Accept {
         }
     }
 
-    async fn http_service(
-        &self,
-    ) -> buffer::Buffer<http::Request<http::Body>, http::Response<http::boxed::Payload>> {
+    async fn http_service(&self) -> BufferedHttp {
         let mut cache = self.http.lock().await;
 
         if let Some(ref buffer) = *cache {
             return buffer.clone();
         }
 
-        let (buffer, task) = buffer::new(
-            HttpService(self.strategy.clone()),
-            self.inner.config.buffer_capacity,
-            None,
-        );
+        let http = HttpService {
+            rx: self.strategy.clone(),
+            concretes: HashMap::default(),
+            endpoints: HashMap::default(),
+        };
+        let (buffer, task) = buffer::new(http, self.inner.config.buffer_capacity, None);
         tokio::spawn(task);
         *cache = Some(buffer.clone());
 
@@ -318,9 +314,13 @@ impl Accept {
 }
 
 #[derive(Clone, Debug)]
-struct HttpService(watch::Receiver<Strategy>);
+struct HttpService {
+    rx: watch::Receiver<Strategy>,
+    concretes: HashMap<String, ()>,
+    endpoints: HashMap<String, ()>,
+}
 
-impl tower::Service<http::Request<http::Body>> for HttpService {
+impl Service<http::Request<http::Body>> for HttpService {
     type Response = http::Response<http::boxed::Payload>;
     type Error = Error;
     type Future = Pin<
@@ -331,7 +331,18 @@ impl tower::Service<http::Request<http::Body>> for HttpService {
         >,
     >;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        if let Poll::Ready(Some(strategy)) = self.rx.poll_recv_ref(cx) {
+            let _target = strategy.target.clone();
+            // loop {
+            //     target = match target {
+            //         Target::Concrete(concrete) => unimplemented!("LB"),
+            //         Target::Endpoint(endpoint) => unimplemented!("endpoint"),
+            //         Target::LogicalSplit(split) => unimplemented!("split"),
+            //     };
+            // }
+        }
+
         Poll::Ready(Ok(()))
     }
 
