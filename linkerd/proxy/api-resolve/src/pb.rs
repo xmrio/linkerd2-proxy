@@ -1,11 +1,11 @@
-use crate::api::destination::{
-    protocol_hint::Protocol, AuthorityOverride, TlsIdentity, WeightedAddr,
-};
-use crate::api::net::TcpAddress;
-use crate::identity;
 use crate::metadata::{Metadata, ProtocolHint};
 use http::uri::Authority;
 use indexmap::IndexMap;
+use linkerd2_identity as identity;
+use linkerd2_proxy_api::{
+    destination::{protocol_hint::Protocol, AuthorityOverride, TlsIdentity, WeightedAddr},
+    net::TcpAddress,
+};
 use std::{collections::HashMap, net::SocketAddr};
 
 /// Construct a new labeled `SocketAddr `from a protobuf `WeightedAddr`.
@@ -43,7 +43,7 @@ pub(in crate) fn to_addr_meta(
     }
 
     let tls_id = pb.tls_identity.and_then(to_id);
-    let meta = Metadata::new(meta, proto_hint, tls_id, pb.weight, authority_override);
+    let meta = Metadata::new(meta, proto_hint, tls_id, authority_override);
     Some((addr, meta))
 }
 
