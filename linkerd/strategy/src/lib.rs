@@ -2,6 +2,7 @@
 
 use futures::prelude::*;
 use http_body::Body as HttpBody;
+use linkerd2_addr::Addr;
 use linkerd2_error::{Error, Recover};
 use linkerd2_identity as identity;
 use linkerd2_proxy_api::destination::{self as api, destination_client::DestinationClient};
@@ -33,7 +34,7 @@ pub struct Client<S, R> {
 pub struct Strategy {
     pub addr: SocketAddr,
     pub detect: Detect,
-    pub target: Target,
+    pub target: Target<Destination>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -43,32 +44,41 @@ pub enum Detect {
 }
 
 #[derive(Clone, Debug)]
-pub struct Concrete {
-    pub authority: String,
-    pub metric_labels: HashMap<String, String>,
-    // FIXME profile: ...,
+pub enum Destination {
+    Balance(Balance),
+    Forward(Forward),
 }
 
 #[derive(Clone, Debug)]
-pub struct LogicalSplit {
-    pub metric_labels: HashMap<String, String>,
-    pub weights: WeightedIndex<u32>,
-    pub targets: Vec<Target>,
+pub struct Balance {
+    pub destination: http::uri::Authority,
+    // TODO metadata, profiles
 }
 
 #[derive(Clone, Debug)]
-pub struct Endpoint {
+pub struct Forward {
     pub addr: SocketAddr,
     pub identity: Option<identity::Name>,
-    pub metric_labels: HashMap<String, String>,
-    // FIXME metadata
+    // TODO metadata...
 }
 
 #[derive(Clone, Debug)]
-pub enum Target {
-    Endpoint(Arc<Endpoint>),
-    Concrete(Arc<Concrete>),
-    LogicalSplit(Arc<LogicalSplit>),
+pub enum Target<T> {
+    Leaf(T),
+    Alt(Arc<Alt<T>>),
+    Union(Arc<Union<T>>),
+}
+
+#[derive(Clone, Debug)]
+pub struct Alt<T> {
+    primary: Target<T>,
+    alternates: Vec<Target<T>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Union<T> {
+    targets: Vec<Target<T>>,
+    weights: WeightedIndex<u32>,
 }
 
 pub type Init = (Strategy, grpc::codec::Streaming<api::StrategyResponse>);
@@ -270,8 +280,8 @@ impl Strategy {
     }
 }
 
-impl Target {
-    fn new(api::Target { kind }: api::Target) -> Option<Self> {
+impl Target<Destination> {
+    fn from_api(api::Target { kind }: api::Target) -> Option<Self> {
         let target = match kind? {
             api::target::Kind::Endpoint(api::target::Endpoint { addr }) => {
                 let addr = SocketAddr::try_from(addr?.addr?).ok()?;
