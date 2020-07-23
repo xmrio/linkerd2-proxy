@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 pub use linkerd2_identity as identity;
 
 /// Metadata describing an endpoint.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Metadata {
     /// Arbitrary endpoint labels. Primarily used for telemetry.
     labels: IndexMap<String, String>,
@@ -28,19 +28,16 @@ pub enum ProtocolHint {
     Http2,
 }
 
+impl Default for ProtocolHint {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 // === impl Metadata ===
 
 impl Metadata {
-    pub fn empty() -> Self {
-        Self {
-            labels: IndexMap::default(),
-            protocol_hint: ProtocolHint::Unknown,
-            identity: None,
-            authority_override: None,
-        }
-    }
-
-    pub fn new(
+    pub(crate) fn new(
         labels: IndexMap<String, String>,
         protocol_hint: ProtocolHint,
         identity: Option<identity::Name>,

@@ -400,7 +400,7 @@ impl<B> router::Recognize<http::Request<B>> for LogicalPerRequest {
         let inner = HttpEndpoint {
             settings,
             addr: self.0.addrs.target_addr(),
-            metadata: Metadata::empty(),
+            metadata: Metadata::default(),
             identity: identity_from_header(req, L5D_REQUIRE_ID)
                 .map(Conditional::Some)
                 .unwrap_or_else(|| {

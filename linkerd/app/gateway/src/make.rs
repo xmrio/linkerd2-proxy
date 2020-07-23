@@ -124,7 +124,7 @@ where
                         inner: outbound::HttpEndpoint {
                             addr: dst_addr,
                             settings: http_settings,
-                            metadata: Metadata::empty(),
+                            metadata: Metadata::default(),
                             identity: tls::PeerIdentity::None(
                                 tls::ReasonForNoPeerName::NotProvidedByServiceDiscovery.into(),
                             ),
