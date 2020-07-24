@@ -206,8 +206,7 @@ where
         let http_svc = self.make_http.new_service(proto.tls);
 
         let mut builder = self.http.clone();
-        let initial_stream_window_size = self.h2_settings.initial_stream_window_size;
-        let initial_conn_window_size = self.h2_settings.initial_connection_window_size;
+        let h2 = self.h2_settings;
         Box::pin(async move {
             match http_version {
                 HttpVersion::Http1 => {
@@ -230,8 +229,8 @@ where
                 HttpVersion::H2 => {
                     let conn = builder
                         .http2_only(true)
-                        .http2_initial_stream_window_size(initial_stream_window_size)
-                        .http2_initial_connection_window_size(initial_conn_window_size)
+                        .http2_initial_stream_window_size(h2.initial_stream_window_size)
+                        .http2_initial_connection_window_size(h2.initial_connection_window_size)
                         .serve_connection(io, HyperServerSvc::new(http_svc));
                     Ok(Box::pin(async move {
                         drain
