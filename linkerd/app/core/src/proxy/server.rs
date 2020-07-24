@@ -101,7 +101,6 @@ where
     H::Service: Service<http::Request<Body>, Response = http::Response<B>>,
 {
     http: hyper::server::conn::Http<trace::Executor>,
-    h2_settings: H2Settings,
     forward_tcp: F,
     make_http: H,
     drain: drain::Watch,
@@ -113,11 +112,14 @@ where
     H::Service: Service<http::Request<Body>, Response = http::Response<B>>,
     Self: Accept<Connection>,
 {
-    /// Creates a new `Server`.
-    pub fn new(forward_tcp: F, make_http: H, h2_settings: H2Settings, drain: drain::Watch) -> Self {
+    pub fn new(forward_tcp: F, make_http: H, h2: H2Settings, drain: drain::Watch) -> Self {
+        let mut http = hyper::server::conn::Http::new().with_executor(trace::Executor::new());
+        http.http2_adaptive_window(true)
+            .http2_initial_stream_window_size(h2.initial_stream_window_size)
+            .http2_initial_connection_window_size(h2.initial_connection_window_size);
+
         Self {
-            http: hyper::server::conn::Http::new().with_executor(trace::Executor::new()),
-            h2_settings,
+            http,
             forward_tcp,
             make_http,
             drain,
@@ -156,70 +158,66 @@ where
     /// will be mapped into respective services, and spawned into an
     /// executor.
     fn call(&mut self, (proto, io): Connection) -> Self::Future {
-        let drain = self.drain.clone();
         let http_version = match proto.http {
             Some(http) => http,
             None => {
                 trace!("did not detect protocol; forwarding TCP");
+                let drain = self.drain.clone();
+                let forward = self.forward_tcp.clone();
+                return Box::pin(async move {
+                    let conn = forward
+                        .into_service()
+                        .oneshot((proto.tls, io))
+                        .await
+                        .map_err(Into::into)?;
 
-                let accept = self
-                    .forward_tcp
-                    .clone()
-                    .into_service()
-                    .oneshot((proto.tls, io));
-                let fwd = async move {
-                    let conn = accept.await.map_err(Into::into)?;
-                    Ok(Box::pin(
+                    let rsp: Self::Response = Box::pin(
                         drain
                             .ignore_signal()
                             .release_after(conn)
                             .map_err(Into::into),
-                    ) as Self::Response)
-                };
+                    );
 
-                return Box::pin(fwd);
+                    Ok(rsp)
+                });
             }
         };
 
         let http_svc = self.make_http.new_service(proto.tls);
 
         let mut builder = self.http.clone();
-        let initial_stream_window_size = self.h2_settings.initial_stream_window_size;
-        let initial_conn_window_size = self.h2_settings.initial_connection_window_size;
+        let drain = self.drain.clone();
         Box::pin(async move {
-            match http_version {
-                HttpVersion::Http1 => {
-                    // Enable support for HTTP upgrades (CONNECT and websockets).
-                    let svc = upgrade::Service::new(http_svc, drain.clone());
-                    let conn = builder
-                        .http1_only(true)
-                        .serve_connection(io, HyperServerSvc::new(svc))
-                        .with_upgrades();
-
-                    Ok(Box::pin(async move {
+            let rsp: Self::Response = Box::pin(async move {
+                match http_version {
+                    HttpVersion::Http1 => {
+                        // Enable support for HTTP upgrades (CONNECT and websockets).
+                        let svc = upgrade::Service::new(http_svc, drain.clone());
+                        let conn = builder
+                            .http1_only(true)
+                            .serve_connection(io, HyperServerSvc::new(svc))
+                            .with_upgrades();
                         drain
                             .watch(conn, |conn| Pin::new(conn).graceful_shutdown())
                             .instrument(info_span!("h1"))
                             .await?;
-                        Ok(())
-                    }) as Self::Response)
-                }
+                    }
 
-                HttpVersion::H2 => {
-                    let conn = builder
-                        .http2_only(true)
-                        .http2_initial_stream_window_size(initial_stream_window_size)
-                        .http2_initial_connection_window_size(initial_conn_window_size)
-                        .serve_connection(io, HyperServerSvc::new(http_svc));
-                    Ok(Box::pin(async move {
+                    HttpVersion::H2 => {
+                        let conn = builder
+                            .http2_only(true)
+                            .serve_connection(io, HyperServerSvc::new(http_svc));
                         drain
                             .watch(conn, |conn| Pin::new(conn).graceful_shutdown())
                             .instrument(info_span!("h2"))
                             .await?;
-                        Ok(())
-                    }) as Self::Response)
+                    }
                 }
-            }
+
+                Ok(())
+            });
+
+            Ok(rsp)
         })
     }
 }
@@ -234,7 +232,6 @@ where
     fn clone(&self) -> Self {
         Self {
             http: self.http.clone(),
-            h2_settings: self.h2_settings.clone(),
             forward_tcp: self.forward_tcp.clone(),
             make_http: self.make_http.clone(),
             drain: self.drain.clone(),
