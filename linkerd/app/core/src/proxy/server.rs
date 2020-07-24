@@ -4,10 +4,7 @@ use crate::proxy::http::{
     trace, upgrade, Version as HttpVersion,
 };
 use crate::transport::{
-    self,
     io::{self, BoxedIo, Peekable},
-    labels::Key as TransportKey,
-    metrics::TransportLabels,
     tls,
 };
 use crate::{
@@ -98,41 +95,29 @@ impl detect::Detect<tls::accept::Meta> for ProtocolDetect {
 ///
 /// *  Otherwise, an `H`-typed `Service` is used to build a service that
 ///    can route HTTP  requests for the `tls::accept::Meta`.
-pub struct Server<L, F, H, B>
+pub struct Server<F, H, B>
 where
     H: NewService<tls::accept::Meta>,
     H::Service: Service<http::Request<Body>, Response = http::Response<B>>,
 {
     http: hyper::server::conn::Http<trace::Executor>,
     h2_settings: H2Settings,
-    transport_labels: L,
-    transport_metrics: transport::Metrics,
     forward_tcp: F,
     make_http: H,
     drain: drain::Watch,
 }
 
-impl<L, F, H, B> Server<L, F, H, B>
+impl<F, H, B> Server<F, H, B>
 where
-    L: TransportLabels<Protocol, Labels = TransportKey>,
     H: NewService<tls::accept::Meta>,
     H::Service: Service<http::Request<Body>, Response = http::Response<B>>,
     Self: Accept<Connection>,
 {
     /// Creates a new `Server`.
-    pub fn new(
-        transport_labels: L,
-        transport_metrics: transport::Metrics,
-        forward_tcp: F,
-        make_http: H,
-        h2_settings: H2Settings,
-        drain: drain::Watch,
-    ) -> Self {
+    pub fn new(forward_tcp: F, make_http: H, h2_settings: H2Settings, drain: drain::Watch) -> Self {
         Self {
             http: hyper::server::conn::Http::new().with_executor(trace::Executor::new()),
             h2_settings,
-            transport_labels,
-            transport_metrics,
             forward_tcp,
             make_http,
             drain,
@@ -140,10 +125,9 @@ where
     }
 }
 
-impl<L, F, H, B> Service<Connection> for Server<L, F, H, B>
+impl<F, H, B> Service<Connection> for Server<F, H, B>
 where
-    L: TransportLabels<Protocol, Labels = TransportKey>,
-    F: Accept<(tls::accept::Meta, transport::metrics::Io<BoxedIo>)> + Clone + Send + 'static,
+    F: Accept<(tls::accept::Meta, BoxedIo)> + Clone + Send + 'static,
     F::Future: Send + 'static,
     F::ConnectionFuture: Send + 'static,
     H: NewService<tls::accept::Meta> + Send + 'static,
@@ -172,12 +156,6 @@ where
     /// will be mapped into respective services, and spawned into an
     /// executor.
     fn call(&mut self, (proto, io): Connection) -> Self::Future {
-        // TODO move this into a distinct Accept?
-        let io = {
-            let labels = self.transport_labels.transport_labels(&proto);
-            self.transport_metrics.wrap_server_transport(labels, io)
-        };
-
         let drain = self.drain.clone();
         let http_version = match proto.http {
             Some(http) => http,
@@ -206,7 +184,8 @@ where
         let http_svc = self.make_http.new_service(proto.tls);
 
         let mut builder = self.http.clone();
-        let h2 = self.h2_settings;
+        let initial_stream_window_size = self.h2_settings.initial_stream_window_size;
+        let initial_conn_window_size = self.h2_settings.initial_connection_window_size;
         Box::pin(async move {
             match http_version {
                 HttpVersion::Http1 => {
@@ -229,8 +208,8 @@ where
                 HttpVersion::H2 => {
                     let conn = builder
                         .http2_only(true)
-                        .http2_initial_stream_window_size(h2.initial_stream_window_size)
-                        .http2_initial_connection_window_size(h2.initial_connection_window_size)
+                        .http2_initial_stream_window_size(initial_stream_window_size)
+                        .http2_initial_connection_window_size(initial_conn_window_size)
                         .serve_connection(io, HyperServerSvc::new(http_svc));
                     Ok(Box::pin(async move {
                         drain
@@ -245,9 +224,8 @@ where
     }
 }
 
-impl<L, F, H, B> Clone for Server<L, F, H, B>
+impl<F, H, B> Clone for Server<F, H, B>
 where
-    L: TransportLabels<Protocol, Labels = TransportKey> + Clone,
     F: Clone,
     H: NewService<tls::accept::Meta> + Clone,
     H::Service: Service<http::Request<Body>, Response = http::Response<B>>,
@@ -257,8 +235,6 @@ where
         Self {
             http: self.http.clone(),
             h2_settings: self.h2_settings.clone(),
-            transport_labels: self.transport_labels.clone(),
-            transport_metrics: self.transport_metrics.clone(),
             forward_tcp: self.forward_tcp.clone(),
             make_http: self.make_http.clone(),
             drain: self.drain.clone(),

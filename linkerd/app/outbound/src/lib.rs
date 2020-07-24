@@ -529,9 +529,11 @@ impl Config {
             )
             .check_new_service::<tls::accept::Meta>();
 
+        // FIXME
+        //TransportLabels,
+        //metrics.transport,
+
         let tcp_server = Server::new(
-            TransportLabels,
-            metrics.transport,
             tcp_forward.into_inner(),
             http_server.into_inner(),
             h2_settings,
