@@ -1,20 +1,23 @@
 use async_trait::async_trait;
 use futures::prelude::*;
 use linkerd2_error::Error;
-use linkerd2_io::BoxedIo;
+use linkerd2_io::{AsyncRead, AsyncWrite, BoxedIo};
 use linkerd2_proxy_core as core;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tower::util::ServiceExt;
 
 /// A strategy for detecting values out of a client transport.
 #[async_trait]
-pub trait Detect<T> {
+pub trait Detect<T, I: AsyncRead + AsyncWrite> {
     type Target;
+    type Io: AsyncRead + AsyncWrite + Send + Unpin;
     type Error: Into<Error>;
 
-    async fn detect(&self, target: T, io: BoxedIo) -> Result<(Self::Target, BoxedIo), Self::Error>;
+    async fn detect(&self, target: T, io: I) -> Result<(Self::Target, Self::Io), Self::Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +51,7 @@ impl<D: Clone, A> tower::layer::Layer<A> for DetectProtocolLayer<D> {
 impl<T, D, A> tower::Service<(T, BoxedIo)> for DetectProtocol<D, A>
 where
     T: Send + 'static,
-    D: Detect<T> + Clone + Send + 'static,
+    D: Detect<T, BoxedIo, Io = BoxedIo> + Clone + Send + 'static,
     D::Target: Send,
     A: core::Accept<(D::Target, BoxedIo)> + Send + Clone + 'static,
     A::Future: Send,

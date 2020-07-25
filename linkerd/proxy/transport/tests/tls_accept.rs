@@ -29,9 +29,9 @@ use tracing_futures::Instrument;
 #[test]
 fn plaintext() {
     let (client_result, server_result) = run_test(
-        Conditional::None(tls::ReasonForNoIdentity::Disabled),
+        Conditional::None(tls::ReasonForNoPeerName::Disabled),
         |conn| write_then_read(conn, PING),
-        Conditional::None(tls::ReasonForNoIdentity::Disabled),
+        Conditional::None(tls::ReasonForNoPeerName::Disabled),
         |(_, conn)| read_then_write(conn, PING.len(), PONG),
     );
     assert_eq!(client_result.is_tls(), false);
