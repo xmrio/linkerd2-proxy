@@ -6,7 +6,7 @@ pub mod accept;
 pub mod client;
 pub mod conditional_accept;
 
-pub use self::accept::AcceptTls;
+pub use self::accept::DetectTls;
 pub use self::client::ConnectLayer;
 
 /// Describes whether or not a connection was secured with TLS and, if it was
