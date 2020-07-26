@@ -193,7 +193,7 @@ impl tap::Inspect for Target {
         req.extensions()
             .get::<tls::accept::Meta>()
             .map(|s| s.peer_identity.as_ref())
-            .unwrap_or_else(|| Conditional::None(tls::ReasonForNoPeerName::Disabled))
+            .unwrap_or_else(|| Conditional::None(tls::ReasonForNoPeerName::LocalIdentityDisabled))
     }
 
     fn dst_addr<B>(&self, _: &http::Request<B>) -> Option<SocketAddr> {

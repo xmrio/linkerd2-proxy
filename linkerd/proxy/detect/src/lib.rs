@@ -21,37 +21,41 @@ pub trait Detect<T, I: AsyncRead + AsyncWrite> {
 }
 
 #[derive(Debug, Clone)]
-pub struct DetectProtocolLayer<D> {
+pub struct AcceptLayer<D> {
     detect: D,
 }
 
 #[derive(Debug, Clone)]
-pub struct DetectProtocol<D, A> {
+pub struct Accept<D, A> {
     detect: D,
     accept: A,
 }
 
-impl<D> DetectProtocolLayer<D> {
+impl<D> AcceptLayer<D> {
     pub fn new(detect: D) -> Self {
         Self { detect }
     }
 }
 
-impl<D: Clone, A> tower::layer::Layer<A> for DetectProtocolLayer<D> {
-    type Service = DetectProtocol<D, A>;
+impl<D: Clone, A> tower::layer::Layer<A> for AcceptLayer<D> {
+    type Service = Accept<D, A>;
 
     fn layer(&self, accept: A) -> Self::Service {
-        Self::Service {
-            detect: self.detect.clone(),
-            accept,
-        }
+        Self::Service::new(self.detect.clone(), accept)
     }
 }
 
-impl<T, D, A> tower::Service<(T, BoxedIo)> for DetectProtocol<D, A>
+impl<D: Clone, A> Accept<D, A> {
+    pub fn new(detect: D, accept: A) -> Self {
+        Self { detect, accept }
+    }
+}
+
+impl<T, I, D, A> tower::Service<(T, I)> for Accept<D, A>
 where
     T: Send + 'static,
-    D: Detect<T, BoxedIo, Io = BoxedIo> + Clone + Send + 'static,
+    I: AsyncRead + AsyncWrite + Send + 'static,
+    D: Detect<T, I, Io = BoxedIo> + Clone + Send + 'static,
     D::Target: Send,
     A: core::Accept<(D::Target, BoxedIo)> + Send + Clone + 'static,
     A::Future: Send,
@@ -65,7 +69,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, (target, io): (T, BoxedIo)) -> Self::Future {
+    fn call(&mut self, (target, io): (T, I)) -> Self::Future {
         let detect = self.detect.clone();
         let mut accept = self.accept.clone().into_service();
         Box::pin(async move {
