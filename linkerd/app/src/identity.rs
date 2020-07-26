@@ -38,6 +38,8 @@ struct Recover(ExponentialBackoff);
 
 pub type Task = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
+pub type LocalIdentity = tls::Conditional<Local>;
+
 impl Config {
     pub fn build(self, dns: dns::Resolver, metrics: Metrics) -> Result<Identity, Error> {
         match self {

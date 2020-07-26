@@ -11,7 +11,7 @@ use crate::transport::{
 use crate::{
     drain,
     proxy::{core::Accept, detect},
-    svc::{Service, ServiceExt},
+    svc::{NewService, Service, ServiceExt},
     Error,
 };
 use async_trait::async_trait;
@@ -121,8 +121,7 @@ where
     F: Accept<(T, D::Io)> + Clone + Send + 'static,
     F::Future: Send + 'static,
     F::ConnectionFuture: Send + 'static,
-    H: Service<T, Error = Error, Response = S> + Clone + Send + 'static,
-    H::Future: Send + 'static,
+    H: NewService<T, Service = S> + Clone + Send + 'static,
     S: Service<http::Request<Body>, Response = http::Response<BoxBody>, Error = Error>
         + Unpin
         + Send
@@ -158,7 +157,7 @@ where
             let rsp: Self::Response = Box::pin(async move {
                 match http {
                     Some(http_version) => {
-                        let svc = make_http.oneshot(target).await?;
+                        let svc = make_http.new_service(target);
 
                         match http_version {
                             HttpVersion::Http1 => {

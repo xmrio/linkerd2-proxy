@@ -17,7 +17,7 @@ use linkerd2_app_core::{
     opencensus::proto::trace::v1 as oc,
     profiles,
     proxy::{
-        detect,
+        detect::Detect,
         http::{self, normalize_uri, orig_proto, strip_header},
         identity,
         server::{Protocol as ServerProtocol, ProtocolDetect, Server},
@@ -392,7 +392,8 @@ impl Config {
                     .push(http_admit_request)
                     .push(http_server_observability)
                     .push(metrics.stack.layer(stack_labels("source")))
-                    .box_http_request(),
+                    .box_http_request()
+                    .box_http_response(),
             )
             .check_new_service::<tls::accept::Meta>()
             .instrument(|src: &tls::accept::Meta| {
@@ -405,8 +406,14 @@ impl Config {
         // FIXME
         // TransportLabels,
         // metrics.transport,
+        //  .push(admit::AdmitLayer::new(require_identity_for_inbound_ports))
+        let _ = require_identity_for_inbound_ports;
 
+        let detect =
+            tls::DetectTls::new(local_identity, disable_protocol_detection_for_ports.clone())
+                .and_then(ProtocolDetect::new(disable_protocol_detection_for_ports));
         let tcp_server = Server::new(
+            detect,
             tcp_forward.into_inner(),
             http_server.into_inner(),
             h2_settings,
@@ -414,15 +421,6 @@ impl Config {
         );
 
         let tcp_detect = svc::stack(tcp_server)
-            .push(detect::AcceptLayer::new(ProtocolDetect::new(
-                disable_protocol_detection_for_ports.clone(),
-            )))
-            .push(admit::AdmitLayer::new(require_identity_for_inbound_ports))
-            // Terminates inbound mTLS from other outbound proxies.
-            .push(detect::AcceptLayer::new(tls::DetectTls::new(
-                local_identity,
-                disable_protocol_detection_for_ports,
-            )))
             // Limits the amount of time that the TCP server spends waiting for TLS handshake &
             // protocol detection. Ensures that connections that never emit data are dropped
             // eventually.
@@ -458,11 +456,11 @@ impl transport::metrics::TransportLabels<TcpEndpoint> for TransportLabels {
     }
 }
 
-impl transport::metrics::TransportLabels<ServerProtocol> for TransportLabels {
+impl transport::metrics::TransportLabels<ServerProtocol<tls::accept::Meta>> for TransportLabels {
     type Labels = transport::labels::Key;
 
-    fn transport_labels(&self, proto: &ServerProtocol) -> Self::Labels {
-        transport::labels::Key::accept("inbound", proto.tls.peer_identity.as_ref())
+    fn transport_labels(&self, proto: &ServerProtocol<tls::accept::Meta>) -> Self::Labels {
+        transport::labels::Key::accept("inbound", proto.target.peer_identity.as_ref())
     }
 }
 

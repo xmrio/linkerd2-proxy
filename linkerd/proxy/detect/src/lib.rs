@@ -18,6 +18,19 @@ pub trait Detect<T, I: AsyncRead + AsyncWrite> {
     type Error: Into<Error>;
 
     async fn detect(&self, target: T, io: I) -> Result<(Self::Target, Self::Io), Self::Error>;
+
+    fn and_then<B: Detect<Self::Target, Self::Io>>(self, b: B) -> AndThen<Self, B>
+    where
+        Self: Sized,
+    {
+        AndThen { a: self, b }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AndThen<A, B> {
+    a: A,
+    b: B,
 }
 
 #[derive(Debug, Clone)]
@@ -82,5 +95,24 @@ where
 
             accept.call(conn).await.map_err(Into::into)
         })
+    }
+}
+
+#[async_trait]
+impl<A, B, T, I> Detect<T, I> for AndThen<A, B>
+where
+    T: Send + 'static,
+    I: AsyncRead + AsyncWrite + Send + 'static,
+    A: Detect<T, I> + Send + Sync,
+    A::Target: Send + 'static,
+    B: Detect<A::Target, A::Io> + Send + Sync,
+{
+    type Target = B::Target;
+    type Io = B::Io;
+    type Error = Error;
+
+    async fn detect(&self, target: T, io: I) -> Result<(Self::Target, Self::Io), Self::Error> {
+        let (target, io) = self.a.detect(target, io).err_into::<Error>().await?;
+        self.b.detect(target, io).err_into::<Error>().await
     }
 }

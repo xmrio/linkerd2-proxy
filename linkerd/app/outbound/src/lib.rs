@@ -18,8 +18,8 @@ use linkerd2_app_core::{
     opencensus::proto::trace::v1 as oc,
     profiles,
     proxy::{
-        self, core::resolve::Resolve, detect, discover, http, identity, resolve::map_endpoint,
-        server::ProtocolDetect, tap, tcp, Server,
+        self, core::resolve::Resolve, detect::Detect, discover, http, identity,
+        resolve::map_endpoint, server::ProtocolDetect, tap, tcp, Server,
     },
     reconnect, retry, router, serve,
     spans::SpanConverter,
@@ -506,8 +506,8 @@ impl Config {
             .push(metrics.clone().http_handle_time.layer());
 
         let http_server = svc::stack(http_router)
-            // Resolve the application-emitted destination via DNS to determine                                                                                                                      
-            // its canonical FQDN to use for routing.                                                                                                                                                
+            // Resolve the application-emitted destination via DNS to determine
+            // its canonical FQDN to use for routing.
             .push(http::canonicalize::Layer::new(refine, canonicalize_timeout))
             .check_make_service::<Logical<HttpEndpoint>, http::Request<_>>()
             .push_make_ready()
@@ -521,6 +521,7 @@ impl Config {
                     .push(http_admit_request)
                     .push(metrics.stack.layer(stack_labels("source")))
                     .box_http_request()
+                    .box_http_response()
             )
             .instrument(
                 |src: &tls::accept::Meta| {
@@ -533,29 +534,22 @@ impl Config {
         //TransportLabels,
         //metrics.transport,
 
+        let no_tls: tls::Conditional<identity::Local> =
+            Conditional::None(tls::ReasonForNoPeerName::Loopback);
+
+        let detect =
+            tls::accept::DetectTls::new(no_tls, disable_protocol_detection_for_ports.clone())
+                .and_then(ProtocolDetect::new(disable_protocol_detection_for_ports));
+
         let tcp_server = Server::new(
+            detect,
             tcp_forward.into_inner(),
             http_server.into_inner(),
             h2_settings,
             drain.clone(),
         );
 
-        let no_tls: tls::Conditional<identity::Local> =
-            Conditional::None(tls::ReasonForNoPeerName::Loopback);
-
-        let tcp_detect = svc::stack(tcp_server)
-            .push(detect::AcceptLayer::new(ProtocolDetect::new(
-                disable_protocol_detection_for_ports.clone(),
-            )))
-            // The local application never establishes mTLS with the proxy, so don't try to
-            // terminate TLS, just annotate with the connection with the reason.
-            .push(detect::AcceptLayer::new(tls::DetectTls::new(
-                no_tls,
-                disable_protocol_detection_for_ports,
-            )))
-            // Limits the amount of time that the TCP server spends waiting for protocol
-            // detection. Ensures that connections that never emit data are dropped eventually.
-            .push_timeout(detect_protocol_timeout);
+        let tcp_detect = svc::stack(tcp_server).push_timeout(detect_protocol_timeout);
 
         info!(addr = %listen_addr, "Serving");
         serve::serve(listen, tcp_detect.into_inner(), drain.signal()).await
@@ -585,11 +579,13 @@ impl transport::metrics::TransportLabels<TcpEndpoint> for TransportLabels {
     }
 }
 
-impl transport::metrics::TransportLabels<proxy::server::Protocol> for TransportLabels {
+impl transport::metrics::TransportLabels<proxy::server::Protocol<tls::accept::Meta>>
+    for TransportLabels
+{
     type Labels = transport::labels::Key;
 
-    fn transport_labels(&self, proto: &proxy::server::Protocol) -> Self::Labels {
-        transport::labels::Key::accept("outbound", proto.tls.peer_identity.as_ref())
+    fn transport_labels(&self, proto: &proxy::server::Protocol<tls::accept::Meta>) -> Self::Labels {
+        transport::labels::Key::accept("outbound", proto.target.peer_identity.as_ref())
     }
 }
 
