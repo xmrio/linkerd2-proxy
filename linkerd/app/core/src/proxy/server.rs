@@ -37,6 +37,24 @@ pub struct DetectHttp {
     skip_ports: Arc<IndexSet<u16>>,
 }
 
+/// Accepts HTTP connections.
+///
+/// The server accepts TCP connections with their detected protocol. If the
+/// protocol is known to be HTTP, a server is built with a new HTTP service
+/// (built using the `H`-typed NewService).
+///
+/// Otherwise, the `F` type forwarding service is used to handle the TCP
+/// connection.
+#[derive(Clone, Debug)]
+pub struct ServeHttp<F, H> {
+    http: hyper::server::conn::Http<trace::Executor>,
+    forward_tcp: F,
+    make_http: H,
+    drain: drain::Watch,
+}
+
+// === impl DetectHttp ===
+
 impl DetectHttp {
     const PEEK_CAPACITY: usize = 8192;
 
@@ -74,27 +92,12 @@ impl detect::Detect<tls::accept::Meta, BoxedIo> for DetectHttp {
     }
 }
 
-/// Accepts HTTP connections.
-///
-/// The server accepts TCP connections with their detected protocol. If the
-/// protocol is known to be HTTP, a server is built with a new HTTP service
-/// (built using the `H`-typed NewService).
-///
-/// Otherwise, the `F` type forwarding service is used to handle the TCP
-/// connection.
-#[derive(Clone, Debug)]
-pub struct ServeHttp<F, H> {
-    http: hyper::server::conn::Http<trace::Executor>,
-    forward_tcp: F,
-    make_http: H,
-    drain: drain::Watch,
-}
+// === impl ServeHttp ===
 
 impl<F, H> ServeHttp<F, H> {
     /// Creates a new `ServeHttp`.
     pub fn new(make_http: H, h2: H2Settings, forward_tcp: F, drain: drain::Watch) -> Self {
         let mut http = hyper::server::conn::Http::new().with_executor(trace::Executor::new());
-
         http.http2_initial_stream_window_size(h2.initial_stream_window_size)
             .http2_initial_connection_window_size(h2.initial_connection_window_size);
 

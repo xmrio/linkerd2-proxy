@@ -1,4 +1,4 @@
-use linkerd2_proxy_transport::io::{self, BoxedIo, Peekable};
+use linkerd2_proxy_transport::io::{self, Peekable, PrefixedIo};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Version {
@@ -42,12 +42,15 @@ impl Version {
         None
     }
 
-    pub async fn detect(io: BoxedIo) -> io::Result<(Option<Version>, BoxedIo)> {
+    pub async fn detect<I>(io: I) -> io::Result<(Option<Version>, PrefixedIo<I>)>
+    where
+        I: io::AsyncRead + io::AsyncWrite + Unpin,
+    {
         // If we don't find a newline, we consider the stream to be HTTP/1; so
         // we need enough capacity to prevent false-positives.
         let io = io.peek(8192).await?;
         let version = Version::from_prefix(io.prefix());
-        Ok((version, BoxedIo::new(io)))
+        Ok((version, io))
     }
 }
 
