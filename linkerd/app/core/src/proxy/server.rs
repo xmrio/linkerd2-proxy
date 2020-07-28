@@ -74,7 +74,7 @@ impl detect::Detect<tls::accept::Meta, BoxedIo> for DetectHttp {
     }
 }
 
-/// Accepts a TCP stream according to its detected protocol.
+/// Accepts HTTP connections.
 ///
 /// The server accepts TCP connections with their detected protocol. If the
 /// protocol is known to be HTTP, a server is built with a new HTTP service
@@ -83,16 +83,16 @@ impl detect::Detect<tls::accept::Meta, BoxedIo> for DetectHttp {
 /// Otherwise, the `F` type forwarding service is used to handle the TCP
 /// connection.
 #[derive(Clone, Debug)]
-pub struct Server<F, H> {
+pub struct ServeHttp<F, H> {
     http: hyper::server::conn::Http<trace::Executor>,
     forward_tcp: F,
     make_http: H,
     drain: drain::Watch,
 }
 
-impl<F, H> Server<F, H> {
-    /// Creates a new `Server`.
-    pub fn new(forward_tcp: F, make_http: H, h2: H2Settings, drain: drain::Watch) -> Self {
+impl<F, H> ServeHttp<F, H> {
+    /// Creates a new `ServeHttp`.
+    pub fn new(make_http: H, h2: H2Settings, forward_tcp: F, drain: drain::Watch) -> Self {
         let mut http = hyper::server::conn::Http::new().with_executor(trace::Executor::new());
 
         http.http2_initial_stream_window_size(h2.initial_stream_window_size)
@@ -107,14 +107,14 @@ impl<F, H> Server<F, H> {
     }
 }
 
-impl<T, I, F, H, S> Service<(Protocol<T>, I)> for Server<F, H>
+impl<T, I, F, H, S> Service<(Protocol<T>, I)> for ServeHttp<F, H>
 where
     T: Send + 'static,
     I: io::AsyncRead + io::AsyncWrite + Send + Unpin + 'static,
     F: Accept<(T, I)> + Clone + Send + 'static,
     F::Future: Send + 'static,
     F::ConnectionFuture: Send + 'static,
-    H: NewService<T, Service = S> + Send + 'static,
+    H: NewService<T, Service = S> + Clone + Send + 'static,
     S: Service<http::Request<Body>, Response = http::Response<http::boxed::Payload>, Error = Error>
         + Unpin
         + Send
@@ -130,72 +130,69 @@ where
         Poll::Ready(Ok(().into()))
     }
 
-    /// Handle a new connection.
-    ///
-    /// This will peek on the connection for the first bytes to determine
-    /// what protocol the connection is speaking. From there, the connection
-    /// will be mapped into respective services, and spawned into an
-    /// executor.
-    fn call(&mut self, (Protocol { http, target }, io): (Protocol<T>, I)) -> Self::Future {
+    fn call(&mut self, (protocol, io): (Protocol<T>, I)) -> Self::Future {
         let drain = self.drain.clone();
-        let http_version = match http {
-            Some(http) => http,
-            None => {
-                trace!("did not detect protocol; forwarding TCP");
+        let forward_tcp = self.forward_tcp.clone();
+        let make_http = self.make_http.clone();
+        let mut http = self.http.clone();
 
-                let accept = self
-                    .forward_tcp
-                    .clone()
-                    .into_service()
-                    .oneshot((target, io));
-                let fwd = async move {
-                    let conn = accept.await.map_err(Into::into)?;
-                    Ok(Box::pin(
-                        drain
-                            .ignore_signal()
-                            .release_after(conn)
-                            .map_err(Into::into),
-                    ) as Self::Response)
-                };
-
-                return Box::pin(fwd);
-            }
-        };
-
-        let http_svc = self.make_http.new_service(target);
-        let mut builder = self.http.clone();
         Box::pin(async move {
-            match http_version {
-                HttpVersion::Http1 => {
+            let rsp: Self::Response = match protocol.http {
+                Some(HttpVersion::Http1) => {
+                    trace!("Handling as HTTP");
                     // Enable support for HTTP upgrades (CONNECT and websockets).
-                    let svc = upgrade::Service::new(http_svc, drain.clone());
-                    let conn = builder
+                    let svc = upgrade::Service::new(
+                        make_http.new_service(protocol.target),
+                        drain.clone(),
+                    );
+                    let conn = http
                         .http1_only(true)
                         .serve_connection(io, HyperServerSvc::new(svc))
                         .with_upgrades();
 
-                    Ok(Box::pin(async move {
+                    Box::pin(async move {
                         drain
                             .watch(conn, |conn| Pin::new(conn).graceful_shutdown())
                             .instrument(info_span!("h1"))
                             .await?;
                         Ok(())
-                    }) as Self::Response)
+                    })
                 }
 
-                HttpVersion::H2 => {
-                    let conn = builder
-                        .http2_only(true)
-                        .serve_connection(io, HyperServerSvc::new(http_svc));
-                    Ok(Box::pin(async move {
+                Some(HttpVersion::H2) => {
+                    trace!("Handling as H2");
+                    let conn = http.http2_only(true).serve_connection(
+                        io,
+                        HyperServerSvc::new(make_http.new_service(protocol.target)),
+                    );
+
+                    Box::pin(async move {
                         drain
                             .watch(conn, |conn| Pin::new(conn).graceful_shutdown())
                             .instrument(info_span!("h2"))
                             .await?;
                         Ok(())
-                    }) as Self::Response)
+                    })
                 }
-            }
+
+                None => {
+                    trace!("Forwarding TCP");
+                    let duplex = forward_tcp
+                        .into_service()
+                        .oneshot((protocol.target, io))
+                        .await
+                        .map_err(Into::into)?;
+
+                    Box::pin(
+                        drain
+                            .ignore_signal()
+                            .release_after(duplex)
+                            .map_err(Into::into),
+                    )
+                }
+            };
+
+            Ok(rsp)
         })
     }
 }

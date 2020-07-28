@@ -20,7 +20,7 @@ use linkerd2_app_core::{
         self, detect,
         http::{self, normalize_uri, orig_proto, strip_header},
         identity,
-        server::{DetectHttp, Server},
+        server::{DetectHttp, ServeHttp},
         tap, tcp,
     },
     reconnect, router, serve,
@@ -403,10 +403,10 @@ impl Config {
                 )
             });
 
-        let tcp_server = Server::new(
-            tcp_forward.into_inner(),
+        let tcp_server = ServeHttp::new(
             http_server.into_inner(),
             h2_settings,
+            tcp_forward.into_inner(),
             drain.clone(),
         );
 
