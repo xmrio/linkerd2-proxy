@@ -32,16 +32,16 @@ pub struct Protocol<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProtocolDetect {
+pub struct DetectHttp {
     capacity: usize,
     skip_ports: Arc<IndexSet<u16>>,
 }
 
-impl ProtocolDetect {
+impl DetectHttp {
     const PEEK_CAPACITY: usize = 8192;
 
     pub fn new(skip_ports: Arc<IndexSet<u16>>) -> Self {
-        ProtocolDetect {
+        DetectHttp {
             skip_ports,
             capacity: Self::PEEK_CAPACITY,
         }
@@ -49,7 +49,7 @@ impl ProtocolDetect {
 }
 
 #[async_trait]
-impl detect::Detect<tls::accept::Meta, BoxedIo> for ProtocolDetect {
+impl detect::Detect<tls::accept::Meta, BoxedIo> for DetectHttp {
     type Target = Protocol<tls::accept::Meta>;
     type Io = BoxedIo;
     type Error = io::Error;
