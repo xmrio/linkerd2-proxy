@@ -40,15 +40,15 @@ pub struct DetectTls<I> {
     skip_ports: Arc<IndexSet<u16>>,
 }
 
+// The initial peek buffer is statically allocated on the stack and is fairly small; but it is
+// large enough to hold the ~300B ClientHello sent by proxies.
+const PEEK_CAPACITY: usize = 512;
+
+// A larger fallback buffer is allocated onto the heap if the initial peek buffer is
+// insufficient. This is the same value used in HTTP detection.
+const BUFFER_CAPACITY: usize = 8192;
+
 impl<I: HasConfig> DetectTls<I> {
-    // The initial peek buffer is statically allocated on the stack and is fairly small; but it is
-    // large enough to hold the ~300B ClientHello sent by proxies.
-    const PEEK_CAPACITY: usize = 512;
-
-    // A larger fallback buffer is allocated onto the heap if the initial peek buffer is
-    // insufficient. This is the same value used in HTTP detection.
-    const BUFFER_CAPACITY: usize = 8192;
-
     pub fn new(local_identity: Conditional<I>, skip_ports: Arc<IndexSet<u16>>) -> Self {
         Self {
             local_identity,
@@ -63,9 +63,9 @@ impl<I: HasConfig + Send + Sync> detect::Detect<Addrs, TcpStream> for DetectTls<
     type Io = BoxedIo;
     type Error = io::Error;
 
-    async fn detect(&self, addrs: Addrs, mut tcp: TcpStream) -> io::Result<(Meta, BoxedIo)> {
-        let local_id = match self.local_identity.as_ref() {
-            Conditional::Some(local_id) => local_id,
+    async fn detect(&self, addrs: Addrs, tcp: TcpStream) -> io::Result<(Meta, BoxedIo)> {
+        let local = match self.local_identity.as_ref() {
+            Conditional::Some(l) => l,
             Conditional::None(reason) => {
                 let meta = Meta {
                     peer_identity: Conditional::None(reason),
@@ -85,90 +85,92 @@ impl<I: HasConfig + Send + Sync> detect::Detect<Addrs, TcpStream> for DetectTls<
             return Ok((meta, BoxedIo::new(tcp)));
         }
 
-        let no_tls_meta = move |addrs: Addrs| Meta {
-            peer_identity: Conditional::None(ReasonForNoPeerName::NoTlsFromRemote),
+        let (peer_identity, io) =
+            detect(local.tls_server_config(), local.tls_server_name(), tcp).await?;
+
+        let meta = Meta {
             addrs,
+            peer_identity,
         };
-
-        // First, try to use MSG_PEEK to read the SNI from the TLS ClientHello.
-        // Because peeked data does not need to be retained, we use a static
-        // buffer to prevent needless heap allocation.
-        //
-        // Anecdotally, the ClientHello sent by Linkerd proxies is <300B. So a
-        // ~500B byte buffer is more than enough.
-        let mut buf = [0u8; Self::PEEK_CAPACITY];
-        let sz = tcp.peek(&mut buf).await?;
-        debug!(sz, "Peeked bytes from TCP stream");
-        match conditional_accept::match_client_hello(&buf, &local_id.tls_server_name()) {
-            conditional_accept::Match::Matched => {
-                trace!("Identified matching SNI via peek");
-                // Terminate the TLS stream.
-                let (peer_identity, tls) = handshake(local_id, tcp).await?;
-                let meta = Meta {
-                    peer_identity,
-                    addrs,
-                };
-                return Ok((meta, BoxedIo::new(tls)));
-            }
-
-            conditional_accept::Match::NotMatched => {
-                trace!("Not a matching TLS ClientHello");
-                return Ok((no_tls_meta(addrs), BoxedIo::new(tcp)));
-            }
-
-            conditional_accept::Match::Incomplete => {}
-        }
-
-        // Peeking didn't return enough data, so instead we'll allocate more
-        // capacity and try reading data from the socket.
-        debug!("Attempting to buffer TLS ClientHello after incomplete peek");
-        let mut buf = BytesMut::with_capacity(Self::BUFFER_CAPACITY);
-        debug!(buf.capacity = %buf.capacity(), "Reading bytes from TCP stream");
-        while tcp.read_buf(&mut buf).await? != 0 {
-            debug!(buf.len = %buf.len(), "Read bytes from TCP stream");
-            match conditional_accept::match_client_hello(buf.as_ref(), &local_id.tls_server_name())
-            {
-                conditional_accept::Match::Matched => {
-                    trace!("Identified matching SNI via buffered read");
-                    // Terminate the TLS stream.
-                    let (peer_identity, tls) =
-                        handshake(local_id, PrefixedIo::new(buf.freeze(), tcp)).await?;
-                    let meta = Meta {
-                        peer_identity,
-                        addrs,
-                    };
-                    return Ok((meta, BoxedIo::new(tls)));
-                }
-
-                conditional_accept::Match::NotMatched => break,
-
-                conditional_accept::Match::Incomplete => {
-                    if buf.capacity() == 0 {
-                        // If we can't buffer an entire TLS ClientHello, it
-                        // almost definitely wasn't initiated by another proxy,
-                        // at least.
-                        warn!("Buffer insufficient for TLS ClientHello");
-                        break;
-                    }
-                }
-            }
-        }
-
-        trace!("Could not read TLS ClientHello via buffering");
-        let io = BoxedIo::new(PrefixedIo::new(buf.freeze(), tcp));
-        Ok((no_tls_meta(addrs), io))
+        Ok((meta, io))
     }
 }
 
-async fn handshake<L, T>(
-    local_id: &L,
+async fn detect(
+    tls_config: Arc<Config>,
+    local_id: identity::Name,
+    mut tcp: TcpStream,
+) -> io::Result<(PeerIdentity, BoxedIo)> {
+    const NO_TLS_META: PeerIdentity = Conditional::None(ReasonForNoPeerName::NoTlsFromRemote);
+
+    // First, try to use MSG_PEEK to read the SNI from the TLS ClientHello.
+    // Because peeked data does not need to be retained, we use a static
+    // buffer to prevent needless heap allocation.
+    //
+    // Anecdotally, the ClientHello sent by Linkerd proxies is <300B. So a
+    // ~500B byte buffer is more than enough.
+    let mut buf = [0u8; PEEK_CAPACITY];
+    let sz = tcp.peek(&mut buf).await?;
+    debug!(sz, "Peeked bytes from TCP stream");
+    match conditional_accept::match_client_hello(&buf, &local_id) {
+        conditional_accept::Match::Matched => {
+            trace!("Identified matching SNI via peek");
+            // Terminate the TLS stream.
+            let (peer_id, tls) = handshake(tls_config, tcp).await?;
+            return Ok((peer_id, BoxedIo::new(tls)));
+        }
+
+        conditional_accept::Match::NotMatched => {
+            trace!("Not a matching TLS ClientHello");
+            return Ok((NO_TLS_META, BoxedIo::new(tcp)));
+        }
+
+        conditional_accept::Match::Incomplete => {}
+    }
+
+    // Peeking didn't return enough data, so instead we'll allocate more
+    // capacity and try reading data from the socket.
+    debug!("Attempting to buffer TLS ClientHello after incomplete peek");
+    let mut buf = BytesMut::with_capacity(BUFFER_CAPACITY);
+    debug!(buf.capacity = %buf.capacity(), "Reading bytes from TCP stream");
+    while tcp.read_buf(&mut buf).await? != 0 {
+        debug!(buf.len = %buf.len(), "Read bytes from TCP stream");
+        match conditional_accept::match_client_hello(buf.as_ref(), &local_id) {
+            conditional_accept::Match::Matched => {
+                trace!("Identified matching SNI via buffered read");
+                // Terminate the TLS stream.
+                let (peer_id, tls) =
+                    handshake(tls_config.clone(), PrefixedIo::new(buf.freeze(), tcp)).await?;
+                return Ok((peer_id, BoxedIo::new(tls)));
+            }
+
+            conditional_accept::Match::NotMatched => break,
+
+            conditional_accept::Match::Incomplete => {
+                if buf.capacity() == 0 {
+                    // If we can't buffer an entire TLS ClientHello, it
+                    // almost definitely wasn't initiated by another proxy,
+                    // at least.
+                    warn!("Buffer insufficient for TLS ClientHello");
+                    break;
+                }
+            }
+        }
+    }
+
+    trace!("Could not read TLS ClientHello via buffering");
+    let io = BoxedIo::new(PrefixedIo::new(buf.freeze(), tcp));
+    Ok((NO_TLS_META, io))
+}
+
+async fn handshake<T>(
+    tls_config: Arc<Config>,
     io: T,
 ) -> io::Result<(PeerIdentity, tokio_rustls::server::TlsStream<T>)>
 where
-    L: HasConfig,
     T: io::AsyncRead + io::AsyncWrite + Unpin,
 {
-    let tls = tokio_rustls::TlsAcceptor::from(local_id.tls_server_config())
+    let tls = tokio_rustls::TlsAcceptor::from(tls_config)
         .accept(io)
         .await?;
 

@@ -27,6 +27,7 @@ linkerd2-duplex = { path  = "../../duplex" }
 linkerd2-error = { path  = "../../error" }
 linkerd2-http-box = { path  = "../../http-box" }
 linkerd2-identity = { path  = "../../identity" }
+linkerd2-proxy-transport = { path  = "../transport" }
 linkerd2-stack = { path  = "../../stack" }
 linkerd2-timeout = { path  = "../../timeout" }
 rand = "0.7"

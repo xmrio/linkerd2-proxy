@@ -1266,6 +1266,7 @@ dependencies = [
  "linkerd2-error",
  "linkerd2-http-box",
  "linkerd2-identity",
+ "linkerd2-proxy-transport",
  "linkerd2-stack",
  "linkerd2-timeout",
  "pin-project",

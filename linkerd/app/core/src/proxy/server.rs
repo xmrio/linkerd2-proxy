@@ -5,7 +5,7 @@ use crate::proxy::http::{
     trace, upgrade, Version as HttpVersion,
 };
 use crate::transport::{
-    io::{self, BoxedIo, Peekable},
+    io::{self, BoxedIo},
     tls,
 };
 use crate::{
@@ -69,10 +69,8 @@ impl detect::Detect<tls::accept::Meta, BoxedIo> for ProtocolDetect {
 
         // Otherwise, attempt to peek the client connection to determine the protocol.
         // Currently, we only check for an HTTP prefix.
-        let peek = io.peek(self.capacity).await?;
-        let http = HttpVersion::from_prefix(peek.prefix().as_ref());
-        let proto = Protocol { target, http };
-        Ok((proto, BoxedIo::new(peek)))
+        let (http, io) = HttpVersion::detect(io).await?;
+        Ok((Protocol { target, http }, BoxedIo::new(io)))
     }
 }
 
