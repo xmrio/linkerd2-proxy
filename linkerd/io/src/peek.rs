@@ -19,7 +19,7 @@ struct Inner<T> {
     io: T,
 }
 
-pub trait Peekable: Io + Sized + Unpin {
+pub trait Peekable: AsyncRead + AsyncWrite + Sized + Unpin {
     fn peek(self, capacity: usize) -> Peek<Self> {
         Peek::with_capacity(capacity, self)
     }
