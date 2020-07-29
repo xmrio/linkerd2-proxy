@@ -63,4 +63,7 @@ debug = false
 
 [patch.crates-io]
 webpki = { git = "https://github.com/linkerd/webpki", branch = "cert-dns-names-0.21" }
-tower = { version = "0.3", git = "https://github.com/tower-rs/tower", rev = "8752a3811788e94670c62dc0acbc9613207931b1"}
+tower = { version = "0.3", git = "https://github.com/tower-rs/tower", rev = "8752a3811788e94670c62dc0acbc9613207931b1" }
+tracing = { git = "https://github.com/tokio-rs/tracing", rev = "0ededf6a99ba180b4a599aee62580e131bc12313" }
+tracing-core = { git = "https://github.com/tokio-rs/tracing", rev = "0ededf6a99ba180b4a599aee62580e131bc12313" }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", rev = "0ededf6a99ba180b4a599aee62580e131bc12313" }

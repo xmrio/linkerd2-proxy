@@ -3080,3 +3080,18 @@ dependencies = [
  "winapi 0.2.8",
  "winapi-build",
 ]
+
+[[patch.unused]]
+name = "tracing"
+version = "0.1.17"
+source = "git+https://github.com/tokio-rs/tracing?rev=0ededf6a99ba180b4a599aee62580e131bc12313#0ededf6a99ba180b4a599aee62580e131bc12313"
+
+[[patch.unused]]
+name = "tracing-core"
+version = "0.1.12"
+source = "git+https://github.com/tokio-rs/tracing?rev=0ededf6a99ba180b4a599aee62580e131bc12313#0ededf6a99ba180b4a599aee62580e131bc12313"
+
+[[patch.unused]]
+name = "tracing-subscriber"
+version = "0.2.9"
+source = "git+https://github.com/tokio-rs/tracing?rev=0ededf6a99ba180b4a599aee62580e131bc12313#0ededf6a99ba180b4a599aee62580e131bc12313"
