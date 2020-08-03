@@ -31,7 +31,6 @@ tower = "0.3"
 tracing = "0.1.9"
 tracing-futures = { version = "0.2", features = ["std-future"] }
 html-escape = "0.2.5"
-quanta = "0.6"
 
 [dev-dependencies]
 bytes = "0.5"

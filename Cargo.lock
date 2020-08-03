@@ -856,7 +856,6 @@ dependencies = [
  "linkerd2-opencensus",
  "linkerd2-proxy-api",
  "net2",
- "quanta",
  "quickcheck",
  "regex 1.2.1",
  "ring",
