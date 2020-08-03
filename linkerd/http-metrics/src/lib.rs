@@ -5,8 +5,11 @@ use indexmap::IndexMap;
 // use parking_lot::RwLock;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, RwLock,
+};
+use std::time::Duration;
 
 pub mod requests;
 pub mod retries;
@@ -27,6 +30,7 @@ where
 {
     prefix: &'static str,
     registry: Arc<RwLock<Registry<T, M>>>,
+    clock: quanta::Clock,
     /// The amount time metrics with no updates should be retained for reports
     retain_idle: Duration,
     /// Whether latencies should be reported.
@@ -37,6 +41,7 @@ impl<T: Hash + Eq, M> Clone for Report<T, M> {
     fn clone(&self) -> Self {
         Self {
             include_latencies: self.include_latencies,
+            clock: self.clock.clone(),
             prefix: self.prefix.clone(),
             registry: self.registry.clone(),
             retain_idle: self.retain_idle,
@@ -50,7 +55,13 @@ struct Prefixed<'p, N: fmt::Display> {
 }
 
 trait LastUpdate {
-    fn last_update(&self) -> Instant;
+    fn last_update(&self) -> quanta::Instant;
+}
+
+#[derive(Debug)]
+pub(crate) struct LastUpdateTime {
+    clock: quanta::Clock,
+    last_update: AtomicU64,
 }
 
 impl<T, M> Default for Registry<T, M>
@@ -71,7 +82,7 @@ where
 {
     /// Retains metrics for all targets that (1) no longer have an active
     /// reference to the `RequestMetrics` structure and (2) have not been updated since `epoch`.
-    fn retain_since(&mut self, epoch: Instant) {
+    fn retain_since(&mut self, epoch: quanta::Instant) {
         self.by_target.retain(|_, m| {
             Arc::strong_count(&m) > 1 || m.read().map(|m| m.last_update() >= epoch).unwrap_or(false)
         })
@@ -105,6 +116,7 @@ where
     fn new(retain_idle: Duration, registry: Arc<RwLock<Registry<T, M>>>) -> Self {
         Self {
             prefix: "",
+            clock: quanta::Clock::new(),
             registry,
             retain_idle,
             include_latencies: true,
@@ -141,5 +153,24 @@ impl<'p, N: fmt::Display> fmt::Display for Prefixed<'p, N> {
         }
 
         write!(f, "{}_{}", self.prefix, self.name)
+    }
+}
+
+impl LastUpdateTime {
+    pub(crate) fn update(&self) {
+        let now = self.clock.recent().as_u64();
+        self.last_update.store(now, Ordering::Release);
+    }
+
+    pub(crate) fn last_update(&self) -> quanta::Instant {
+        self.clock.scaled(self.last_update.load(Ordering::Acquire))
+    }
+}
+
+impl Default for LastUpdateTime {
+    fn default() -> Self {
+        let clock = quanta::Clock::new();
+        let last_update = AtomicU64::new(clock.recent().as_u64());
+        Self { clock, last_update }
     }
 }

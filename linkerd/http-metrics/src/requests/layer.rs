@@ -268,9 +268,8 @@ where
 
         if req.body().is_end_stream() {
             if let Some(lock) = req_metrics.take() {
-                let now = Instant::now();
                 if let Ok(metrics) = lock.read() {
-                    (*metrics).last_update.set(now);
+                    (*metrics).last_update.update();
                     (*metrics).total.incr();
                 }
             }
@@ -318,9 +317,8 @@ where
 
         if req.body().is_end_stream() {
             if let Some(lock) = req_metrics.take() {
-                let now = Instant::now();
                 if let Ok(metrics) = lock.read() {
-                    (*metrics).last_update.set(now);
+                    (*metrics).last_update.update();
                     (*metrics).total.incr();
                 }
             }
@@ -408,12 +406,10 @@ where
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
         let this = self.project();
         let frame = ready!(this.inner.poll_data(cx));
-
-        if let Some(lock) = this.metrics.take() {
-            let now = Instant::now();
+        if let Some(lock) = Option::take(this.metrics) {
             if let Ok(metrics) = lock.read() {
+                metrics.last_update.update();
                 (*metrics).total.incr();
-                (*metrics).last_update.set(now);
             }
         }
 
@@ -486,7 +482,7 @@ where
         let status = Some(*this.status);
         if let Some(status_metrics) = metrics.by_status.get(&status) {
             status_metrics.latency.add(now - *this.stream_open_at);
-            (*metrics).last_update.set(Instant::now());
+            (*metrics).last_update.update();
         } else {
             drop(metrics);
             let mut metrics = lock.write().unwrap();
@@ -496,26 +492,20 @@ where
                 .entry(Some(*this.status))
                 .or_insert_with(|| StatusMetrics::default());
             status_metrics.latency.add(now - *this.stream_open_at);
-            (*metrics).last_update.set(Instant::now());
+            (*metrics).last_update.update();
         }
         *this.latency_recorded = true;
     }
 
     fn record_class(self: Pin<&mut Self>, class: C::Class) {
         let this = self.project();
-        if let Some(lock) = this.metrics.take() {
+        if let Some(lock) = Option::take(this.metrics) {
             measure_class(&lock, class, Some(*this.status));
         }
     }
 
     fn measure_err(mut self: Pin<&mut Self>, err: Error) -> Error {
-        if let Some(c) = self
-            .as_mut()
-            .project()
-            .classify
-            .take()
-            .map(|c| c.error(&err))
-        {
+        if let Some(c) = Option::take(self.as_mut().project().classify).map(|c| c.error(&err)) {
             self.record_class(c);
         }
         err
@@ -527,15 +517,13 @@ fn measure_class<C: Hash + Eq>(
     class: C,
     status: Option<http::StatusCode>,
 ) {
-    let now = Instant::now();
-
     // xxx eliza optimize this?
     let mut metrics = match lock.write() {
         Ok(m) => m,
         Err(_) => return,
     };
 
-    (*metrics).last_update.set(now);
+    (*metrics).last_update.update();
 
     let status_metrics = metrics
         .by_status
@@ -611,7 +599,7 @@ where
             self.as_mut().record_latency();
         }
 
-        if let Some(c) = self.as_mut().project().classify.take().map(|c| c.eos(None)) {
+        if let Some(c) = Option::take(self.as_mut().project().classify).map(|c| c.eos(None)) {
             self.as_mut().record_class(c);
         }
     }

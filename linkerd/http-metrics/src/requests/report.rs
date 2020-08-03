@@ -3,7 +3,6 @@ use crate::{Prefixed, Registry, Report};
 use linkerd2_metrics::{latency, Counter, FmtLabels, FmtMetric, FmtMetrics, Histogram, Metric};
 use std::fmt;
 use std::hash::Hash;
-use std::time::Instant;
 use tracing::trace;
 
 struct Status(http::StatusCode);
@@ -78,7 +77,7 @@ where
         self.registry
             .write()
             .unwrap()
-            .retain_since(Instant::now() - self.retain_idle);
+            .retain_since(self.clock.recent() - self.retain_idle);
 
         Ok(())
     }

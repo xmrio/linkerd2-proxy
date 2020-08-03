@@ -1,10 +1,9 @@
 use super::{LastUpdate, Prefixed, Registry, Report};
 use linkerd2_metrics::{Counter, FmtLabels, FmtMetric, FmtMetrics, Metric};
-use std::cell::Cell;
 use std::fmt;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::trace;
 
 #[derive(Debug)]
@@ -15,9 +14,9 @@ where
 #[derive(Clone, Debug)]
 pub struct Handle(Arc<RwLock<Metrics>>);
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Metrics {
-    last_update: Cell<Instant>,
+    last_update: crate::LastUpdateTime,
     retryable: Counter,
     no_budget: Counter,
 }
@@ -53,7 +52,7 @@ impl<T: Hash + Eq> Clone for Retries<T> {
 impl Handle {
     pub fn incr_retryable(&self, has_budget: bool) {
         if let Ok(m) = self.0.read() {
-            m.last_update.set(Instant::now());
+            m.last_update.update();
             m.retryable.incr();
             if !has_budget {
                 m.no_budget.incr();
@@ -64,19 +63,9 @@ impl Handle {
 
 // === impl Metrics ===
 
-impl Default for Metrics {
-    fn default() -> Self {
-        Self {
-            last_update: Cell::new(Instant::now()),
-            retryable: Counter::default(),
-            no_budget: Counter::default(),
-        }
-    }
-}
-
 impl LastUpdate for Metrics {
-    fn last_update(&self) -> Instant {
-        self.last_update.get()
+    fn last_update(&self) -> quanta::Instant {
+        self.last_update.last_update()
     }
 }
 
@@ -128,7 +117,7 @@ where
         self.registry
             .write()
             .unwrap()
-            .retain_since(Instant::now() - self.retain_idle);
+            .retain_since(self.clock.recent() - self.retain_idle);
 
         Ok(())
     }

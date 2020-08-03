@@ -4,11 +4,10 @@ use indexmap::IndexMap;
 use linkerd2_http_classify::ClassifyResponse;
 use linkerd2_metrics::{latency, Counter, FmtMetrics, Histogram};
 // use parking_lot::RwLock;
-use std::cell::Cell;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod layer;
 mod report;
@@ -26,7 +25,7 @@ pub struct Metrics<C>
 where
     C: Hash + Eq,
 {
-    last_update: Cell<Instant>,
+    last_update: crate::LastUpdateTime,
     total: Counter,
     by_status: IndexMap<Option<http::StatusCode>, StatusMetrics<C>>,
 }
@@ -80,7 +79,7 @@ impl<T: Hash + Eq, C: Hash + Eq> Clone for Requests<T, C> {
 impl<C: Hash + Eq> Default for Metrics<C> {
     fn default() -> Self {
         Self {
-            last_update: Cell::new(Instant::now()),
+            last_update: crate::LastUpdateTime::default(),
             total: Counter::default(),
             by_status: IndexMap::default(),
         }
@@ -88,8 +87,8 @@ impl<C: Hash + Eq> Default for Metrics<C> {
 }
 
 impl<C: Hash + Eq> LastUpdate for Metrics<C> {
-    fn last_update(&self) -> Instant {
-        self.last_update.get()
+    fn last_update(&self) -> quanta::Instant {
+        self.last_update.last_update()
     }
 }
 
@@ -111,7 +110,7 @@ mod tests {
     fn expiry() {
         use linkerd2_metrics::FmtLabels;
         use std::fmt;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
 
         #[derive(Clone, Debug, Hash, Eq, PartialEq)]
         struct Target(usize);
@@ -137,19 +136,20 @@ mod tests {
             }
         }
 
+        let mut clock = quanta::Clock::new();
         let retain_idle_for = Duration::from_secs(1);
         let r = super::Requests::<Target, Class>::default();
         let report = r.clone().into_report(retain_idle_for);
         let mut registry = r.0.write().unwrap();
 
-        let before_update = Instant::now();
+        let before_update = clock.now();
         let metrics = registry
             .by_target
             .entry(Target(123))
             .or_insert_with(|| Default::default())
             .clone();
         assert_eq!(registry.by_target.len(), 1, "target should be registered");
-        let after_update = Instant::now();
+        let after_update = clock.now();
 
         registry.retain_since(after_update);
         assert_eq!(
