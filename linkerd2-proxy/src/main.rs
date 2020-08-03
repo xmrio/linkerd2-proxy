@@ -74,7 +74,7 @@ fn main() {
             }
         }
 
-        let drain = app.spawn();
+        let (_upkeep, drain) = app.spawn();
         signal::shutdown().await;
         drain.drain().await;
     });

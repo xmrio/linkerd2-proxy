@@ -279,7 +279,7 @@ impl App {
         }
     }
 
-    pub fn spawn(self) -> drain::Signal {
+    pub fn spawn(self) -> (quanta::Handle, drain::Signal) {
         let App {
             admin,
             drain,
@@ -372,8 +372,13 @@ impl App {
             })
             .expect("admin");
 
+        debug!("starting clock upkeep thread");
+        let upkeep = quanta::Upkeep::new(Duration::from_millis(1))
+            .start()
+            .expect("failed to start quanta upkeep thread");
+
         tokio::spawn(start_proxy);
 
-        drain
+        (upkeep, drain)
     }
 }

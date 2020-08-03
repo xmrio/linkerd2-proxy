@@ -11,7 +11,7 @@ This is used by tests and the executable.
 """
 
 [features]
-mock-orig-dst  = ["linkerd2-app-core/mock-orig-dst"]
+mock-orig-dst = ["linkerd2-app-core/mock-orig-dst"]
 
 [dependencies]
 futures = { version = "0.3" }
@@ -29,8 +29,9 @@ tokio = { version = "0.2", features = ["rt-util"] }
 tonic = { version = "0.2", default-features = false, features = ["prost"] }
 tower = "0.3"
 tracing = "0.1.9"
-tracing-futures = { version = "0.2", features = ["std-future"]}
+tracing-futures = { version = "0.2", features = ["std-future"] }
 html-escape = "0.2.5"
+quanta = "0.6"
 
 [dev-dependencies]
 bytes = "0.5"

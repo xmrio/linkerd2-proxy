@@ -336,7 +336,7 @@ async fn run(proxy: Proxy, mut env: TestEnv, random_ports: bool) -> Listening {
                             Poll::Ready(())
                         });
 
-                        let drain = main.spawn();
+                        let (_upkeep, drain) = main.spawn();
                         on_shutdown.await;
                         debug!("after on_shutdown");
                         drain.drain().await;

@@ -19,7 +19,7 @@ nyi = []
 
 [dependencies]
 bytes = "0.5"
-futures = "0.3" 
+futures = "0.3"
 h2 = "0.2.6"
 http = "0.2"
 http-body = "0.3"
@@ -33,9 +33,9 @@ net2 = "0.2"
 quickcheck = { version = "0.9", default-features = false }
 ring = "0.16"
 rustls = "0.17"
-tokio = { version = "0.2", features = ["io-util", "net", "rt-core"]}
+tokio = { version = "0.2", features = ["io-util", "net", "rt-core"] }
 tokio-rustls = "0.13"
-tower = { version = "0.3", default-features = false} 
+tower = { version = "0.3", default-features = false }
 tonic = { version = "0.2", default-features = false }
 tracing = "0.1.9"
 tracing-futures = { version = "0.2", features = ["std-future"] }
@@ -54,4 +54,12 @@ flate2 = { version = "1.0.1", default-features = false, features = ["rust_backen
 version = "0.2.8"
 # turn on ANSI colors for tests :)
 default-features = false
-features = ["env-filter", "fmt", "smallvec", "ansi", "tracing-log", "json", "parking_lot"]
+features = [
+    "env-filter",
+    "fmt",
+    "smallvec",
+    "ansi",
+    "tracing-log",
+    "json",
+    "parking_lot",
+]

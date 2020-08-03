@@ -135,8 +135,11 @@ mod tests {
                 }
             }
         }
-
+        let _upkeep = quanta::Upkeep::new(Duration::from_millis(1))
+            .start()
+            .expect("failed to start quanta upkeep thread");
         let mut clock = quanta::Clock::new();
+
         let retain_idle_for = Duration::from_secs(1);
         let r = super::Requests::<Target, Class>::default();
         let report = r.clone().into_report(retain_idle_for);
