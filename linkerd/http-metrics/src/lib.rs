@@ -158,7 +158,7 @@ impl<'p, N: fmt::Display> fmt::Display for Prefixed<'p, N> {
 
 impl LastUpdateTime {
     pub(crate) fn update(&self) {
-        let now = self.clock.recent().as_u64();
+        let now = self.clock.raw();
         self.last_update.store(now, Ordering::Release);
     }
 
@@ -170,7 +170,7 @@ impl LastUpdateTime {
 impl Default for LastUpdateTime {
     fn default() -> Self {
         let clock = quanta::Clock::new();
-        let last_update = AtomicU64::new(clock.recent().as_u64());
+        let last_update = AtomicU64::new(clock.raw());
         Self { clock, last_update }
     }
 }
