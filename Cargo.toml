@@ -59,6 +59,7 @@ members = [
 # disable them.
 [profile.dev]
 debug = false
+
 [profile.test]
 debug = false
 
