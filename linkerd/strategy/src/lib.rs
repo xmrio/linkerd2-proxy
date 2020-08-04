@@ -35,8 +35,8 @@ pub struct Client<S, R> {
 #[derive(Clone, Debug)]
 pub struct Strategy {
     pub addr: SocketAddr,
-    pub detect: Detect,   // TODO watch::Receiver<...>
-    pub logical: Logical, // TODO watch::Receiver<...>
+    pub detect: Detect,
+    pub logical: Logical,
 }
 
 #[derive(Copy, Clone, Debug)]
