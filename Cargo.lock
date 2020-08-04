@@ -933,17 +933,12 @@ dependencies = [
  "bytes 0.5.4",
  "futures 0.3.5",
  "http 0.2.1",
- "hyper",
  "indexmap",
  "linkerd2-app-core",
- "linkerd2-duplex",
  "linkerd2-identity",
  "linkerd2-retry",
- "linkerd2-service-profiles",
- "linkerd2-strategy",
  "pin-project",
  "quickcheck",
- "rand 0.7.2",
  "tokio",
  "tower",
  "tracing",
@@ -1203,7 +1198,7 @@ dependencies = [
 [[package]]
 name = "linkerd2-proxy-api"
 version = "0.1.13"
-source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#c40f9f24e9a2cc71a8293473bafcf505f18e918a"
+source = "git+https://github.com/linkerd/linkerd2-proxy-api?branch=ver/profiles-detection#2bf1f18f81d88dad6ea6e7b8ed8971641c732f40"
 dependencies = [
  "h2 0.2.6",
  "http 0.2.1",

@@ -39,7 +39,6 @@ use tracing::{info, info_span};
 // mod add_remote_ip_on_rsp;
 // #[allow(dead_code)] // TODO #2597
 // mod add_server_id_on_rsp;
-#[allow(dead_code)]
 pub mod endpoint;
 mod orig_proto_upgrade;
 mod prevent_loop;
@@ -569,18 +568,18 @@ fn stack_labels(name: &'static str) -> metric_labels::StackLabels {
 #[derive(Copy, Clone, Debug)]
 struct TransportLabels;
 
-// impl transport::metrics::TransportLabels<Target<HttpEndpoint>> for TransportLabels {
-//     type Labels = transport::labels::Key;
-
-//     fn transport_labels(&self, endpoint: &Target<HttpEndpoint>) -> Self::Labels {
-//         transport::labels::Key::connect("outbound", endpoint.inner.identity.as_ref())
-//     }
-// }
-
-impl transport::metrics::TransportLabels<endpoint::TcpEndpoint> for TransportLabels {
+impl transport::metrics::TransportLabels<Target<HttpEndpoint>> for TransportLabels {
     type Labels = transport::labels::Key;
 
-    fn transport_labels(&self, endpoint: &endpoint::TcpEndpoint) -> Self::Labels {
+    fn transport_labels(&self, endpoint: &Target<HttpEndpoint>) -> Self::Labels {
+        transport::labels::Key::connect("outbound", endpoint.inner.identity.as_ref())
+    }
+}
+
+impl transport::metrics::TransportLabels<TcpEndpoint> for TransportLabels {
+    type Labels = transport::labels::Key;
+
+    fn transport_labels(&self, endpoint: &TcpEndpoint) -> Self::Labels {
         transport::labels::Key::connect("outbound", endpoint.identity.as_ref())
     }
 }

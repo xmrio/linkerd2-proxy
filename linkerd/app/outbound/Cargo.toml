@@ -11,16 +11,11 @@ Configures and runs the outbound proxy
 [dependencies]
 bytes = "0.5"
 http = "0.2"
-hyper = "0.13"
 futures = "0.3"
 indexmap = "1.0"
 linkerd2-app-core = { path = "../core" }
-linkerd2-duplex = { path = "../../duplex" }
 linkerd2-identity = { path = "../../identity" }
 linkerd2-retry = { path = "../../retry" }
-linkerd2-service-profiles = { path = "../../service-profiles" }
-linkerd2-strategy = { path = "../../strategy", features = ["rustfmt"] } # FIXME rustfmt should be disabled before merge
-rand = { version = "0.7", features = ["small_rng"] }
 tokio = { version = "0.2", features = ["sync"]}
 tracing = "0.1.9"
 pin-project = "0.4"

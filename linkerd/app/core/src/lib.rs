@@ -11,7 +11,6 @@
 
 pub use linkerd2_addr::{self as addr, Addr, NameAddr};
 pub use linkerd2_admit as admit;
-pub use linkerd2_buffer as buffer;
 pub use linkerd2_cache as cache;
 pub use linkerd2_conditional::Conditional;
 pub use linkerd2_drain as drain;
@@ -26,7 +25,6 @@ pub use linkerd2_router as router;
 pub use linkerd2_service_profiles as profiles;
 pub use linkerd2_stack_metrics as stack_metrics;
 pub use linkerd2_stack_tracing as stack_tracing;
-pub use linkerd2_timeout as timeout;
 pub use linkerd2_trace_context::TraceContextLayer;
 
 pub mod accept_error;
