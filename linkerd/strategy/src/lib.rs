@@ -278,7 +278,7 @@ impl Strategy {
             .and_then(|d| {
                 d.strategy.map(|s| match s {
                     detect::Strategy::Opaque(_) => Detect::Opaque,
-                    detect::Strategy::Client(detect::ClientData {
+                    detect::Strategy::Client(detect::Client {
                         buffer_capacity,
                         timeout,
                     }) => Detect::Client {
