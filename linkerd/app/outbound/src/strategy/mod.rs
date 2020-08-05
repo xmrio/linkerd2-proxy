@@ -107,11 +107,11 @@ impl Service<TcpStream> for Accept {
             // TODO metrics...
 
             let (protocol, io) = match accept.detect(tcp).await {
+                Ok((protocol, io)) => (protocol, io),
                 Err(error) => {
                     info!(%error, "Protocol detection error");
                     return Ok(());
                 }
-                Ok((protocol, io)) => (protocol, io),
             };
 
             let res = match (protocol, io) {
