@@ -2,6 +2,7 @@
 
 #![deny(warnings, rust_2018_idioms)]
 
+mod chain;
 pub mod fallback;
 mod future_service;
 pub mod layer;
@@ -13,6 +14,7 @@ pub mod on_response;
 mod oneshot;
 mod proxy;
 
+pub use self::chain::Chain;
 pub use self::fallback::{Fallback, FallbackLayer};
 pub use self::future_service::FutureService;
 pub use self::make_ready::{MakeReady, MakeReadyLayer};
