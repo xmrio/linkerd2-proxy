@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use futures::prelude::*;
 use http_body::Body as HttpBody;
 use indexmap::IndexMap;
@@ -13,6 +11,7 @@ use std::{
     convert::TryFrom,
     net::SocketAddr,
     pin::Pin,
+    str::FromStr,
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
@@ -79,6 +78,8 @@ pub struct Endpoint {
     pub authority_override: Option<http::uri::Authority>,
 
     pub metric_labels: IndexMap<String, String>,
+
+    pub connect_timeout: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -297,6 +298,7 @@ impl Strategy {
                 proxy_http_transport: None,
                 authority_override: None,
                 metric_labels: Default::default(),
+                connect_timeout: Duration::from_secs(0),
             }))
         });
 
@@ -311,17 +313,56 @@ impl Strategy {
 impl Logical {
     fn from_api(api::Logical { kind }: api::Logical) -> Option<Self> {
         let target = match kind? {
-            api::logical::Kind::Concrete(api::Concrete { kind }) => match kind? {
+            api::logical::Kind::Concrete(api::Concrete { kind }) => Self::Concrete(match kind? {
                 api::concrete::Kind::Forward(api::concrete::Forward { addr }) => {
-                    let addr = SocketAddr::try_from(addr?.addr?).ok()?;
-                    unimplemented!()
+                    let api::WeightedAddr {
+                        addr,
+                        tls_identity,
+                        authority_override,
+                        connect_timeout,
+                        protocol_hint,
+                        metric_labels,
+                        weight: _,
+                    } = addr?;
+
+                    Concrete::Forward(Endpoint {
+                        addr: SocketAddr::try_from(addr?).ok()?,
+                        identity: tls_identity.and_then(|i| match i.strategy {
+                            Some(api::tls_identity::Strategy::DnsLikeIdentity(n)) => {
+                                identity::Name::from_hostname(n.name.as_ref()).ok()
+                            }
+                            _ => None,
+                        }),
+                        authority_override: authority_override.and_then(|a| {
+                            http::uri::Authority::from_str(a.authority_override.as_ref()).ok()
+                        }),
+                        connect_timeout: connect_timeout
+                            .and_then(|t| Duration::try_from(t).ok())
+                            .unwrap_or_else(|| Duration::from_secs(0)),
+                        proxy_http_transport: protocol_hint.and_then(|t| {
+                            t.protocol.map(|p| {
+                                assert!(matches!(p, api::protocol_hint::Protocol::H2(_)));
+                                ProxyHttpTransport::H2
+                            })
+                        }),
+                        metric_labels: metric_labels.into_iter().collect(),
+                    })
                 }
+
                 api::concrete::Kind::Balance(api::concrete::Balance {
                     authority,
                     peak_ewma_decay,
                     peak_ewma_default_rtt,
-                }) => unimplemented!(),
-            },
+                }) => Concrete::Balance {
+                    destination: http::uri::Authority::from_str(authority.as_ref()).ok()?,
+                    peak_ewma_decay: peak_ewma_decay
+                        .and_then(|t| Duration::try_from(t).ok())
+                        .unwrap_or_else(|| Duration::from_secs(0)),
+                    peak_ewma_default_rtt: peak_ewma_default_rtt
+                        .and_then(|t| Duration::try_from(t).ok())
+                        .unwrap_or_else(|| Duration::from_secs(0)),
+                },
+            }),
 
             api::logical::Kind::Split(split) => {
                 let mut targets = Vec::with_capacity(split.targets.len());
