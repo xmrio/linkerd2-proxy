@@ -51,24 +51,24 @@ pub enum Detect {
 pub enum Logical {
     Concrete(Concrete),
     Split(Arc<Split>),
-    Fallback(Arc<Fallback>),
+    //Fallback(Arc<Fallback>),
 }
 
 #[derive(Clone, Debug)]
 pub enum Concrete {
-    Forward(Endpoint),
-    Balance {
-        destination: http::uri::Authority,
-        // Peak-EWMA settings, if applicable.
-        peak_ewma_decay: Duration,
-        peak_ewma_default_rtt: Duration,
-    },
+    Forward(SocketAddr, Endpoint),
+    Balance(http::uri::Authority, Balancer),
 }
 
-#[derive(Clone, Debug)]
-pub struct Endpoint {
-    pub addr: SocketAddr,
+#[derive(Clone, Debug, Default)]
+pub struct Balancer {
+    // Peak-EWMA settings, if applicable.
+    pub peak_ewma_decay: Duration,
+    pub peak_ewma_default_rtt: Duration,
+}
 
+#[derive(Clone, Debug, Default)]
+pub struct Endpoint {
     pub identity: Option<identity::Name>,
 
     // If set, indicates that the endpoint is running a proxy that supports HTTP
@@ -88,16 +88,17 @@ pub enum ProxyHttpTransport {
     // TODO: H3?
 }
 
-#[derive(Clone, Debug)]
-pub struct Fallback {
-    primary: Logical,
-    fallback: Logical,
-}
+//TODO
+// #[derive(Clone, Debug)]
+// pub struct Fallback {
+//     pub primary: Logical,
+//     pub fallback: Logical,
+// }
 
 #[derive(Clone, Debug)]
 pub struct Split {
-    targets: Vec<Logical>,
-    weights: WeightedIndex<u32>,
+    pub targets: Vec<Logical>,
+    pub weights: WeightedIndex<u32>,
 }
 
 pub type Init = (Strategy, grpc::codec::Streaming<api::StrategyResponse>);
@@ -285,22 +286,15 @@ impl Strategy {
                         buffer_capacity: buffer_capacity as usize,
                         timeout: timeout
                             .and_then(|t| Duration::try_from(t).ok())
-                            .unwrap_or_else(|| Duration::from_secs(0)),
+                            .unwrap_or_default(),
                     },
                 })
             })
             .unwrap_or(Detect::Opaque);
 
-        let logical = logical.and_then(Logical::from_api).unwrap_or_else(|| {
-            Logical::Concrete(Concrete::Forward(Endpoint {
-                addr,
-                identity: None,
-                proxy_http_transport: None,
-                authority_override: None,
-                metric_labels: Default::default(),
-                connect_timeout: Duration::from_secs(0),
-            }))
-        });
+        let logical = logical
+            .and_then(Logical::from_api)
+            .unwrap_or_else(|| Logical::Concrete(Concrete::Forward(addr, Endpoint::default())));
 
         Strategy {
             addr,
@@ -325,43 +319,47 @@ impl Logical {
                         weight: _,
                     } = addr?;
 
-                    Concrete::Forward(Endpoint {
-                        addr: SocketAddr::try_from(addr?).ok()?,
-                        identity: tls_identity.and_then(|i| match i.strategy {
-                            Some(api::tls_identity::Strategy::DnsLikeIdentity(n)) => {
-                                identity::Name::from_hostname(n.name.as_ref()).ok()
-                            }
-                            _ => None,
-                        }),
-                        authority_override: authority_override.and_then(|a| {
-                            http::uri::Authority::from_str(a.authority_override.as_ref()).ok()
-                        }),
-                        connect_timeout: connect_timeout
-                            .and_then(|t| Duration::try_from(t).ok())
-                            .unwrap_or_else(|| Duration::from_secs(0)),
-                        proxy_http_transport: protocol_hint.and_then(|t| {
-                            t.protocol.map(|p| {
-                                assert!(matches!(p, api::protocol_hint::Protocol::H2(_)));
-                                ProxyHttpTransport::H2
-                            })
-                        }),
-                        metric_labels: metric_labels.into_iter().collect(),
-                    })
+                    Concrete::Forward(
+                        SocketAddr::try_from(addr?).ok()?,
+                        Endpoint {
+                            identity: tls_identity.and_then(|i| match i.strategy {
+                                Some(api::tls_identity::Strategy::DnsLikeIdentity(n)) => {
+                                    identity::Name::from_hostname(n.name.as_ref()).ok()
+                                }
+                                _ => None,
+                            }),
+                            authority_override: authority_override.and_then(|a| {
+                                http::uri::Authority::from_str(a.authority_override.as_ref()).ok()
+                            }),
+                            connect_timeout: connect_timeout
+                                .and_then(|t| Duration::try_from(t).ok())
+                                .unwrap_or_default(),
+                            proxy_http_transport: protocol_hint.and_then(|t| {
+                                t.protocol.map(|p| {
+                                    assert!(matches!(p, api::protocol_hint::Protocol::H2(_)));
+                                    ProxyHttpTransport::H2
+                                })
+                            }),
+                            metric_labels: metric_labels.into_iter().collect(),
+                        },
+                    )
                 }
 
                 api::concrete::Kind::Balance(api::concrete::Balance {
                     authority,
                     peak_ewma_decay,
                     peak_ewma_default_rtt,
-                }) => Concrete::Balance {
-                    destination: http::uri::Authority::from_str(authority.as_ref()).ok()?,
-                    peak_ewma_decay: peak_ewma_decay
-                        .and_then(|t| Duration::try_from(t).ok())
-                        .unwrap_or_else(|| Duration::from_secs(0)),
-                    peak_ewma_default_rtt: peak_ewma_default_rtt
-                        .and_then(|t| Duration::try_from(t).ok())
-                        .unwrap_or_else(|| Duration::from_secs(0)),
-                },
+                }) => Concrete::Balance(
+                    http::uri::Authority::from_str(authority.as_ref()).ok()?,
+                    Balancer {
+                        peak_ewma_decay: peak_ewma_decay
+                            .and_then(|t| Duration::try_from(t).ok())
+                            .unwrap_or_default(),
+                        peak_ewma_default_rtt: peak_ewma_default_rtt
+                            .and_then(|t| Duration::try_from(t).ok())
+                            .unwrap_or_default(),
+                    },
+                ),
             }),
 
             api::logical::Kind::Split(split) => {

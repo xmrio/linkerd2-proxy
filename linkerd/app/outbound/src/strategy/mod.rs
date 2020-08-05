@@ -4,13 +4,13 @@ use linkerd2_app_core::{
     buffer,
     config::ProxyConfig,
     drain,
+    duplex::Duplex,
     proxy::{http, identity},
     svc,
     transport::{tls, BoxedIo},
     Error, Never, ProxyMetrics,
 };
-use linkerd2_duplex::Duplex;
-use linkerd2_strategy::{Detect, Endpoint, Strategy, Target};
+use linkerd2_strategy::{Concrete, Detect, Endpoint, Logical, Strategy};
 use rand::{distributions::Distribution, rngs::SmallRng};
 use std::{
     collections::HashMap,
@@ -18,6 +18,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::{
     io,
@@ -160,28 +161,24 @@ impl Accept {
         // There's no need to watch for updates with TCP streams, since the routing decision is made
         // instantaneously.
         let Strategy {
-            addr, mut target, ..
+            addr, mut logical, ..
         } = self.strategy.borrow().clone();
 
         loop {
-            target = match target {
-                Target::LogicalSplit(split) => {
+            logical = match logical {
+                Logical::Split(split) => {
                     let idx = split.weights.sample(&mut self.inner.rng);
                     debug_assert!(idx < split.targets.len());
                     split.targets[idx].clone()
                 }
 
-                Target::Concrete(concrete) => {
+                Logical::Concrete(Concrete::Balance(authority, _)) => {
                     // TODO TCP discovery/balancing.
-                    warn!(%concrete.authority, "TCP load balancing not supported yet; forwarding");
-                    Target::Endpoint(Arc::new(Endpoint {
-                        addr,
-                        identity: None,
-                        metric_labels: Default::default(),
-                    }))
+                    warn!(%authority, "TCP load balancing not supported yet; forwarding");
+                    Logical::Concrete(Concrete::Forward(addr, Endpoint::default()))
                 }
 
-                Target::Endpoint(endpoint) => {
+                Logical::Concrete(Concrete::Forward(addr, endpoint)) => {
                     let id = endpoint
                         .identity
                         .clone()
@@ -192,7 +189,7 @@ impl Accept {
                             )
                         });
 
-                    let dst_io = self.connect(addr, id).await?;
+                    let dst_io = self.connect(addr, id, endpoint.connect_timeout).await?;
                     Duplex::new(io, dst_io).await?;
 
                     return Ok(());
@@ -205,6 +202,7 @@ impl Accept {
         self,
         addr: SocketAddr,
         peer_identity: tls::PeerIdentity,
+        mut timeout: Duration,
     ) -> Result<impl io::AsyncRead + io::AsyncWrite + Send, Error> {
         let Inner {
             config,
@@ -212,12 +210,15 @@ impl Accept {
             metrics,
             ..
         } = self.inner;
+        if timeout == Duration::default() {
+            timeout = config.connect.timeout;
+        }
 
-        let mut connect = svc::connect(config.connect.keepalive)
+        let connect = svc::connect(config.connect.keepalive)
             // Initiates mTLS if the target is configured with identity.
             .push(tls::client::ConnectLayer::new(identity))
             // Limits the time we wait for a connection to be established.
-            .push_timeout(config.connect.timeout)
+            .push_timeout(timeout)
             .push(metrics.transport.layer_connect(crate::TransportLabels))
             .into_inner();
 
@@ -225,7 +226,7 @@ impl Accept {
             addr,
             identity: peer_identity,
         };
-        let io = connect.ready_and().await?.call(endpoint).await?;
+        let io = connect.oneshot(endpoint).await?;
 
         Ok(io)
     }
@@ -237,7 +238,7 @@ impl Accept {
         // - buffered/cached...
         let http_service = self.http_service().await;
 
-        let mut conn = hyper::server::conn::Http::new()
+        let mut conn = http::server::conn::Http::new()
             .with_executor(http::trace::Executor::new())
             .http1_only(true)
             .serve_connection(
@@ -265,7 +266,7 @@ impl Accept {
         // - buffered/cached...
         let http_service = self.http_service().await;
 
-        let mut conn = hyper::server::conn::Http::new()
+        let mut conn = http::server::conn::Http::new()
             .with_executor(http::trace::Executor::new())
             .http2_only(true)
             .http2_initial_stream_window_size(
@@ -333,7 +334,7 @@ impl Service<http::Request<http::Body>> for HttpService {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         if let Poll::Ready(Some(strategy)) = self.rx.poll_recv_ref(cx) {
-            let _target = strategy.target.clone();
+            let _logical = strategy.logical.clone();
             // loop {
             //     target = match target {
             //         Target::Concrete(concrete) => unimplemented!("LB"),

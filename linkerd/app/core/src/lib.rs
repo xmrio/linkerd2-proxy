@@ -11,9 +11,11 @@
 
 pub use linkerd2_addr::{self as addr, Addr, NameAddr};
 pub use linkerd2_admit as admit;
+pub use linkerd2_buffer as buffer;
 pub use linkerd2_cache as cache;
 pub use linkerd2_conditional::Conditional;
 pub use linkerd2_drain as drain;
+pub use linkerd2_duplex as duplex;
 pub use linkerd2_error::{Error, Never, Recover};
 pub use linkerd2_exp_backoff as exp_backoff;
 pub use linkerd2_http_metrics as http_metrics;
