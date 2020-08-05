@@ -40,7 +40,6 @@ type BufferedHttp = buffer::Buffer<http::Request<http::Body>, http::Response<htt
 pub struct Accept {
     strategy: watch::Receiver<Strategy>,
     inner: Inner,
-    http: Arc<Mutex<Option<BufferedHttp>>>,
 }
 
 #[derive(Clone)]
@@ -76,17 +75,12 @@ where
     }
 
     fn call(&mut self, target: SocketAddr) -> Self::Future {
-        let mut get_strategy = self.get_strategy.clone();
+        let get_strategy = self.get_strategy.clone().oneshot(target);
 
         let inner = self.inner.clone();
         Box::pin(async move {
-            let svc = get_strategy.ready_and().await?;
-            let strategy = svc.call(target).await?;
-            return Ok(Accept {
-                inner,
-                strategy,
-                http: Arc::new(Mutex::new(None as Option<BufferedHttp>)),
-            });
+            let strategy = get_strategy.await?;
+            return Ok(Accept { inner, strategy });
         })
     }
 }
@@ -136,19 +130,17 @@ impl Accept {
     async fn detect(&self, tcp: TcpStream) -> Result<(Protocol, BoxedIo), Error> {
         use linkerd2_app_core::transport::io::Peekable;
 
-        if let Detect::Opaque = self.strategy.borrow().detect {
-            return Ok((Protocol::Unknown, BoxedIo::new(tcp)));
-        }
+        let (buffer_capacity, timeout) = match self.strategy.borrow().detect {
+            Detect::Opaque => return Ok((Protocol::Unknown, BoxedIo::new(tcp))),
+            Detect::Client {
+                buffer_capacity,
+                timeout,
+            } => (buffer_capacity, timeout),
+        };
 
-        // TODO sniff  SNI.
-
-        // TODO take advantage TcpStream::peek to avoid allocating a buf per
-        // peek.
-        //
-        // A large buffer is needed, to fit the first line of an arbitrary HTTP
-        // message (i.e. with a long URI).
-        let peek = tcp.peek(8192);
-        let io = tokio::time::timeout(self.inner.config.detect_protocol_timeout, peek).await??;
+        // TODO sniff SNI?
+        let peek = tcp.peek(buffer_capacity);
+        let io = tokio::time::timeout(timeout, peek).await??;
 
         let proto = http::Version::from_prefix(io.prefix().as_ref())
             .map(Protocol::Http)
