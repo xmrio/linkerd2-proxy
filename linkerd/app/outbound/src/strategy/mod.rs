@@ -16,15 +16,10 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::{
-    io,
-    net::TcpStream,
-    sync::{watch, Mutex},
-};
+use tokio::{io, net::TcpStream, sync::watch};
 use tower::{util::ServiceExt, Service};
 use tracing::{debug, info, warn};
 
@@ -99,22 +94,6 @@ impl Service<TcpStream> for Accept {
 
         Box::pin(async move {
             // TODO metrics...
-
-            let (protocol, io) = match accept.detect(tcp).await {
-                Ok((protocol, io)) => (protocol, io),
-                Err(error) => {
-                    info!(%error, "Protocol detection error");
-                    return Ok(());
-                }
-            };
-
-            let res = match (protocol, io) {
-                (Protocol::Unknown, io) => accept.proxy_tcp(io).await,
-                (Protocol::Http(v), io) => match v {
-                    http::Version::Http1 => accept.proxy_http1(io).await,
-                    http::Version::H2 => accept.proxy_h2(io).await,
-                },
-            };
 
             match res {
                 Err(error) => info!(%error, "Connection closed"),
@@ -221,88 +200,6 @@ impl Accept {
         let io = connect.oneshot(endpoint).await?;
 
         Ok(io)
-    }
-
-    async fn proxy_http1(self, io: BoxedIo) -> Result<(), Error> {
-        // TODO
-        // - create an HTTP server
-        // - dispatches to a service that holds the strategy watch...
-        // - buffered/cached...
-        let http_service = self.http_service().await;
-
-        let mut conn = http::server::conn::Http::new()
-            .with_executor(http::trace::Executor::new())
-            .http1_only(true)
-            .serve_connection(
-                io,
-                http::glue::HyperServerSvc::new(http::upgrade::Service::new(
-                    http_service,
-                    self.inner.drain.clone(),
-                )),
-            )
-            .with_upgrades();
-
-        tokio::select! {
-            res = &mut conn => { res.map_err(Into::into) }
-            handle = self.inner.drain.signal() => {
-                Pin::new(&mut conn).graceful_shutdown();
-                handle.release_after(conn).await.map_err(Into::into)
-            }
-        }
-    }
-
-    async fn proxy_h2(self, io: BoxedIo) -> Result<(), Error> {
-        // TODO
-        // - create an HTTP server
-        // - dispatches to a service that holds the strategy watch...
-        // - buffered/cached...
-        let http_service = self.http_service().await;
-
-        let mut conn = http::server::conn::Http::new()
-            .with_executor(http::trace::Executor::new())
-            .http2_only(true)
-            .http2_initial_stream_window_size(
-                self.inner
-                    .config
-                    .server
-                    .h2_settings
-                    .initial_stream_window_size,
-            )
-            .http2_initial_connection_window_size(
-                self.inner
-                    .config
-                    .server
-                    .h2_settings
-                    .initial_connection_window_size,
-            )
-            .serve_connection(io, http::glue::HyperServerSvc::new(http_service));
-
-        tokio::select! {
-            res = &mut conn => { res.map_err(Into::into) }
-            handle = self.inner.drain.signal() => {
-                Pin::new(&mut conn).graceful_shutdown();
-                handle.release_after(conn).await.map_err(Into::into)
-            }
-        }
-    }
-
-    async fn http_service(&self) -> BufferedHttp {
-        let mut cache = self.http.lock().await;
-
-        if let Some(ref buffer) = *cache {
-            return buffer.clone();
-        }
-
-        let http = HttpService {
-            rx: self.strategy.clone(),
-            concretes: HashMap::default(),
-            endpoints: HashMap::default(),
-        };
-        let (buffer, task) = buffer::new(http, self.inner.config.buffer_capacity, None);
-        tokio::spawn(task);
-        *cache = Some(buffer.clone());
-
-        buffer
     }
 }
 
