@@ -13,11 +13,26 @@ use linkerd2_app_core::{
         tap,
     },
     router,
-    transport::{connect, listen, tls},
+    transport::{connect, tls},
     Addr, Conditional, L5D_REQUIRE_ID,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+#[derive(Copy, Clone, Debug)]
+pub struct TargetAddr(SocketAddr);
+
+impl From<SocketAddr> for TargetAddr {
+    fn from(addr: SocketAddr) -> Self {
+        Self(addr)
+    }
+}
+
+impl Into<SocketAddr> for TargetAddr {
+    fn into(self) -> SocketAddr {
+        self.0
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct FromMetadata;
@@ -30,7 +45,7 @@ pub type Concrete<T> = Target<Logical<T>>;
 pub struct Profile(Addr);
 
 #[derive(Clone, Debug)]
-pub struct LogicalPerRequest(listen::Addrs);
+pub struct LogicalPerRequest(TargetAddr);
 
 #[derive(Clone, Debug)]
 pub struct ProfilePerTarget;
@@ -227,8 +242,10 @@ impl http::settings::HasSettings for HttpEndpoint {
 }
 
 impl tap::Inspect for HttpEndpoint {
-    fn src_addr<B>(&self, req: &http::Request<B>) -> Option<SocketAddr> {
-        req.extensions().get::<listen::Addrs>().map(|s| s.peer())
+    fn src_addr<B>(&self, _: &http::Request<B>) -> Option<SocketAddr> {
+        // XXX The source address on the inbound side isn't particularly meaningful.
+        // We can restore it if it's valuable.
+        None
     }
 
     fn src_tls<'a, B>(
@@ -319,10 +336,10 @@ impl Into<EndpointLabels> for Target<HttpEndpoint> {
 
 // === impl TcpEndpoint ===
 
-impl From<listen::Addrs> for TcpEndpoint {
-    fn from(addrs: listen::Addrs) -> Self {
+impl From<TargetAddr> for TcpEndpoint {
+    fn from(target: TargetAddr) -> Self {
         Self {
-            addr: addrs.target_addr(),
+            addr: target.into(),
             identity: Conditional::None(tls::ReasonForNoPeerName::NotHttp.into()),
         }
     }
@@ -354,8 +371,8 @@ impl Into<EndpointLabels> for TcpEndpoint {
 
 // === impl LogicalPerRequest ===
 
-impl From<listen::Addrs> for LogicalPerRequest {
-    fn from(t: listen::Addrs) -> Self {
+impl From<TargetAddr> for LogicalPerRequest {
+    fn from(t: TargetAddr) -> Self {
         LogicalPerRequest(t)
     }
 }
@@ -386,7 +403,7 @@ impl<B> router::Recognize<http::Request<B>> for LogicalPerRequest {
                 })
             })
             .unwrap_or_else(|_| {
-                let addr = self.0.target_addr();
+                let addr: SocketAddr = self.0.into();
                 tracing::debug!(%addr, "using socket target");
                 addr.into()
             });
@@ -397,7 +414,7 @@ impl<B> router::Recognize<http::Request<B>> for LogicalPerRequest {
 
         let inner = HttpEndpoint {
             settings,
-            addr: self.0.target_addr(),
+            addr: self.0.into(),
             metadata: Metadata::empty(),
             identity: identity_from_header(req, L5D_REQUIRE_ID)
                 .map(Conditional::Some)

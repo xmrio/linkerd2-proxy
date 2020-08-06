@@ -113,32 +113,8 @@ impl Addrs {
         self.orig_dst
     }
 
-    pub fn target_addr(&self) -> SocketAddr {
+    pub fn target(&self) -> SocketAddr {
         self.orig_dst.unwrap_or(self.local)
-    }
-
-    pub fn target_addr_is_local(&self) -> bool {
-        self.orig_dst
-            .map(|orig_dst| Self::same_addr(orig_dst, self.local))
-            .unwrap_or(true)
-    }
-
-    pub fn target_addr_if_not_local(&self) -> Option<SocketAddr> {
-        if !self.target_addr_is_local() {
-            Some(self.target_addr())
-        } else {
-            None
-        }
-    }
-
-    fn same_addr(a0: SocketAddr, a1: SocketAddr) -> bool {
-        use std::net::IpAddr::{V4, V6};
-        (a0.port() == a1.port())
-            && match (a0.ip(), a1.ip()) {
-                (V6(a0), V4(a1)) => a0.to_ipv4() == Some(a1),
-                (V4(a0), V6(a1)) => Some(a0) == a1.to_ipv4(),
-                (a0, a1) => (a0 == a1),
-            }
     }
 }
 

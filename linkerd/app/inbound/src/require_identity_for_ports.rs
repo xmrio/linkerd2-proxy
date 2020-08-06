@@ -23,7 +23,7 @@ impl admit::Admit<tls::accept::Meta> for RequireIdentityForPorts {
     type Error = IdentityRequired;
 
     fn admit(&mut self, meta: &tls::accept::Meta) -> Result<(), Self::Error> {
-        let port = meta.addrs.target_addr().port();
+        let port = meta.addrs.target().port();
         let id_required = self.ports.contains(&port);
 
         tracing::debug!(%port, peer.id = ?meta.peer_identity, %id_required);

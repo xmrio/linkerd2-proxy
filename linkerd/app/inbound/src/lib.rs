@@ -18,7 +18,7 @@ use linkerd2_app_core::{
     profiles,
     proxy::{
         http::{self, normalize_uri, orig_proto, strip_header, DetectHttp},
-        identity, tap, tcp, SkipDetect,
+        identity, tap, tcp, SkipDetect, SkipTarget,
     },
     reconnect, router, serve,
     spans::SpanConverter,
@@ -320,7 +320,7 @@ impl Config {
     {
         let ProxyConfig {
             server: ServerConfig { h2_settings, .. },
-            disable_protocol_detection_for_ports: skip_detect,
+            disable_protocol_detection_for_ports: skip_ports,
             dispatch_timeout,
             max_in_flight_requests,
             detect_protocol_timeout,
@@ -385,7 +385,7 @@ impl Config {
             .instrument(|src: &tls::accept::Meta| {
                 info_span!(
                     "source",
-                    target.addr = %src.addrs.target_addr(),
+                    target.addr = %src.addrs.target(),
                 )
             })
             .into_inner()
@@ -417,10 +417,19 @@ impl Config {
             .push_map_target(TcpEndpoint::from)
             .push(metrics.transport.layer_accept(TransportLabels))
             .into_inner();
-        let accept = SkipDetect::new(skip_detect, tls, accept_fwd);
+        let accept = SkipDetect::new(SkipPorts(skip_ports), tls, accept_fwd);
 
         info!(addr = %listen_addr, "Serving");
         serve::serve(listen, accept, drain.signal()).await
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SkipPorts(std::sync::Arc<indexmap::IndexSet<u16>>);
+
+impl SkipTarget<listen::Addrs> for SkipPorts {
+    fn skip_target(&self, addrs: &listen::Addrs) -> bool {
+        self.0.contains(&addrs.target().port())
     }
 }
 
