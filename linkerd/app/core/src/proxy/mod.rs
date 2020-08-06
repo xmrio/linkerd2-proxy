@@ -10,7 +10,7 @@ pub use linkerd2_proxy_tcp as tcp;
 
 mod skip_detect;
 
-pub use self::skip_detect::SkipDetect;
+pub use self::skip_detect::{SkipDetect, SkipTarget};
 
 pub mod http {
     pub use hyper::server;

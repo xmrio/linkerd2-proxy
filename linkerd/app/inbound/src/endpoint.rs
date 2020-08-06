@@ -76,7 +76,7 @@ impl tls::HasPeerIdentity for HttpEndpoint {
 impl From<listen::Addrs> for TcpEndpoint {
     fn from(addrs: listen::Addrs) -> Self {
         Self {
-            port: addrs.target_addr().port(),
+            port: addrs.target().port(),
         }
     }
 }
@@ -84,7 +84,7 @@ impl From<listen::Addrs> for TcpEndpoint {
 impl From<tls::accept::Meta> for TcpEndpoint {
     fn from(meta: tls::accept::Meta) -> Self {
         Self {
-            port: meta.addrs.target_addr().port(),
+            port: meta.addrs.target().port(),
         }
     }
 }
@@ -312,12 +312,11 @@ impl<A> router::Recognize<http::Request<A>> for RequestTarget {
             })
             .or_else(|| http_request_authority_addr(req).ok())
             .or_else(|| http_request_host_addr(req).ok())
-            .or_else(|| self.accept.addrs.target_addr_if_not_local().map(Addr::from))
             .and_then(|a| a.name_addr().cloned());
 
         Target {
             dst_name,
-            addr: self.accept.addrs.target_addr(),
+            addr: self.accept.addrs.target(),
             tls_client_id: self.accept.peer_identity.clone(),
             http_settings: http::Settings::from_request(req),
         }
