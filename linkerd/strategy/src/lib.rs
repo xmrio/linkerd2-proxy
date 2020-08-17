@@ -3,6 +3,7 @@
 use indexmap::IndexMap;
 use linkerd2_identity as identity;
 use linkerd2_proxy_api::destination as api;
+use linkerd2_service_profiles as profiles;
 use rand::distributions::WeightedIndex;
 use std::{convert::TryFrom, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
@@ -110,9 +111,25 @@ impl Strategy {
             .and_then(Logical::from_api)
             .unwrap_or_else(|| Logical::Concrete(Concrete::Forward(addr, Endpoint::default())));
 
-        Strategy {
+        Self {
             addr,
             detect,
+            logical,
+        }
+    }
+
+    pub fn from_profile(addr: SocketAddr, routes: profiles::Routes) -> Self {
+        const DETECT: Detect = Detect::Client { buffer_capacity: 0, timeout: Duration::default(), };
+
+        let logical = if routes.dst_overrides.is_empty() {
+            Logical::Concrete(Concrete::Forward(addr, Endpoint::default()))
+        } else {
+            Logical::Split(Arc::new(Split)
+        };
+
+        Self {
+            addr,
+            detect: DETECT,
             logical,
         }
     }
