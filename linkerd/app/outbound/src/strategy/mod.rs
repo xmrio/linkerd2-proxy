@@ -1,9 +1,8 @@
 use futures::prelude::*;
-use linkerd2_app_core::{profiles, Addr, Error};
+use linkerd2_app_core::{profiles, Error};
 use linkerd2_strategy::{Concrete, Detect, Endpoint, Logical, Strategy};
 use std::{
     collections::HashSet,
-    convert::TryFrom,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
@@ -67,13 +66,13 @@ where
 
 impl<P> Service<SocketAddr> for FromProfiles<P>
 where
-    P: Service<SocketAddr, Response = profiles::Receiver>,
+    P: Service<SocketAddr, Response = profiles::Receiver> + Clone + Send + 'static,
     P::Error: Into<Error> + Send,
     P::Future: Send + 'static,
 {
     type Response = Receiver;
-    type Error = Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Receiver, Error>> + Send + 'static>>;
+    type Error = P::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Receiver, P::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), P::Error>> {
         Poll::Ready(Ok(()))
@@ -90,28 +89,22 @@ where
                     detect: Detect::Opaque,
                     logical: Logical::Concrete(Concrete::Forward(addr, Endpoint::default())),
                 };
-                let (tx, rx) = watch::channel(init.clone());
+                let (mut tx, rx) = watch::channel(init.clone());
                 // Hold the sender until all receivers have dropped.
-                tokio::spawn(tx.closed());
+                tokio::spawn(async move { tx.closed().await });
                 return Ok(rx);
             }
 
-            let profile_rx = get_profiles.oneshot(addr).await?;
-            let init = Strategy::try_from(profile_rx.borrow().clone())?;
-            let (tx, rx) = watch::channel(init.clone());
+            let mut profile_rx = get_profiles.oneshot(addr).await?;
+            let init = Strategy::from_profile(addr, profile_rx.borrow().clone());
+            let (mut tx, rx) = watch::channel(init);
             tokio::spawn(async move {
-                let mut prior = init;
                 loop {
                     tokio::select! {
                         () = tx.closed() => { return; }
                         p = profile_rx.recv() => {
                             if let Some(profile) = p {
-                                if let Ok(strategy) = Strategy::try_from(profile_rx.borrow().clone()) {
-                                    if prior != strategy {
-                                        let _ = tx.broadcast(strategy.clone());
-                                        prior = strategy;
-                                    }
-                                }
+                                let _ = tx.broadcast(Strategy::from_profile(addr, profile));
                             }
                         }
                     }

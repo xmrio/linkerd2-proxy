@@ -35,8 +35,6 @@ pub struct Client<S, R> {
     suffixes: Vec<dns::Suffix>,
 }
 
-pub type Receiver = watch::Receiver<profiles::Routes>;
-
 #[derive(Clone, Debug)]
 pub struct InvalidProfileAddr(Addr);
 
@@ -140,7 +138,7 @@ where
     R: Recover + Send + Clone + 'static,
     R::Backoff: Unpin + Send,
 {
-    type Response = Receiver;
+    type Response = profiles::Receiver;
     type Error = Error;
     type Future = ProfileFuture<S, R>;
 
@@ -206,7 +204,7 @@ where
     R::Backoff: Unpin,
     R::Backoff: Send,
 {
-    type Output = Result<Receiver, Error>;
+    type Output = Result<profiles::Receiver, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project().inner.project() {

@@ -1,6 +1,7 @@
 #![deny(warnings, rust_2018_idioms)]
 
 use indexmap::IndexMap;
+use linkerd2_addr::Addr;
 use linkerd2_identity as identity;
 use linkerd2_proxy_api::destination as api;
 use linkerd2_service_profiles as profiles;
@@ -37,7 +38,7 @@ pub enum Logical {
 #[derive(Clone, Debug)]
 pub enum Concrete {
     Forward(SocketAddr, Endpoint),
-    Balance(http::uri::Authority, Balancer),
+    Balance(Addr, Balancer),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -81,6 +82,17 @@ pub struct Split {
     pub weights: WeightedIndex<u32>,
 }
 
+// === impl Detect ===
+
+impl Default for Detect {
+    fn default() -> Self {
+        Self::Client {
+            buffer_capacity: 0,
+            timeout: Duration::default(),
+        }
+    }
+}
+
 // === impl Strategy ===
 
 impl Strategy {
@@ -119,18 +131,26 @@ impl Strategy {
     }
 
     pub fn from_profile(addr: SocketAddr, routes: profiles::Routes) -> Self {
-        const DETECT: Detect = Detect::Client { buffer_capacity: 0, timeout: Duration::default(), };
-
         let logical = if routes.dst_overrides.is_empty() {
             Logical::Concrete(Concrete::Forward(addr, Endpoint::default()))
         } else {
-            Logical::Split(Arc::new(Split)
+            let mut targets = Vec::with_capacity(routes.dst_overrides.len());
+            let mut weights = Vec::with_capacity(routes.dst_overrides.len());
+            for profiles::WeightedAddr { addr: name, weight } in routes.dst_overrides.into_iter() {
+                if weight > 0 {
+                    targets.push(Logical::Concrete(Concrete::Balance(name.into(), Balancer::default())));
+                    weights.push(weight);
+                }
+            }
+            debug_assert_eq!(weights.len(), targets.len());
+            let weights = WeightedIndex::new(weights).expect("weights must be valid");
+            Logical::Split(Arc::new(Split { targets, weights }))
         };
 
         Self {
             addr,
-            detect: DETECT,
             logical,
+            detect: Detect::default(),
         }
     }
 }
@@ -189,7 +209,7 @@ impl Logical {
                     peak_ewma_decay,
                     peak_ewma_default_rtt,
                 }) => Concrete::Balance(
-                    http::uri::Authority::from_str(authority.as_ref()).ok()?,
+                    Addr::from_str(authority.as_ref()).ok()?,
                     Balancer {
                         peak_ewma_decay: peak_ewma_decay
                             .and_then(|t| Duration::try_from(t).ok())
