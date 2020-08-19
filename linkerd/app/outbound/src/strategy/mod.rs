@@ -34,6 +34,12 @@ impl<S, M> Router<S, M> {
     }
 }
 
+impl<P, M> Router<FromProfiles<P>, M> {
+    pub fn from_profiles(get_profiles: P, make_accept: M) -> Router<FromProfiles<P>, M> {
+        Router::new(FromProfiles::new(get_profiles), make_accept)
+    }
+}
+
 impl<T, S, M> Service<T> for Router<S, M>
 where
     T: Into<SocketAddr>,

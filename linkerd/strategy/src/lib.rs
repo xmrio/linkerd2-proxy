@@ -136,10 +136,13 @@ impl Strategy {
         } else {
             let mut targets = Vec::with_capacity(routes.dst_overrides.len());
             let mut weights = Vec::with_capacity(routes.dst_overrides.len());
-            for profiles::WeightedAddr { addr: name, weight } in routes.dst_overrides.into_iter() {
+            for profiles::WeightedAddr { addr, weight } in routes.dst_overrides.into_iter() {
                 if weight > 0 {
-                    targets.push(Logical::Concrete(Concrete::Balance(name.into(), Balancer::default())));
                     weights.push(weight);
+                    targets.push(Logical::Concrete(Concrete::Balance(
+                        addr.into(),
+                        Balancer::default(),
+                    )));
                 }
             }
             debug_assert_eq!(weights.len(), targets.len());
