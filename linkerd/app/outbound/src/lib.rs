@@ -7,7 +7,7 @@
 
 pub use self::endpoint::{
     Concrete, HttpEndpoint, Logical, LogicalPerRequest, Profile, ProfilePerTarget, Target,
-    TcpEndpoint,
+    TargetAddr, TcpEndpoint,
 };
 use ::http::header::HOST;
 use futures::{future, prelude::*};
@@ -19,7 +19,7 @@ use linkerd2_app_core::{
     profiles,
     proxy::{
         self, core::resolve::Resolve, discover, http, identity, resolve::map_endpoint, tap, tcp,
-        SkipDetect,
+        SkipDetect, SkipTarget,
     },
     reconnect, retry, router, serve,
     spans::SpanConverter,
@@ -38,6 +38,7 @@ pub mod endpoint;
 mod orig_proto_upgrade;
 mod prevent_loop;
 mod require_identity_on_endpoint;
+mod strategy;
 
 use self::orig_proto_upgrade::OrigProtoUpgradeLayer;
 use self::prevent_loop::PreventLoop;
@@ -453,7 +454,7 @@ impl Config {
     {
         let ProxyConfig {
             server: ServerConfig { h2_settings, .. },
-            disable_protocol_detection_for_ports: skip_detect,
+            disable_protocol_detection_for_ports: skip_ports,
             dispatch_timeout,
             max_in_flight_requests,
             detect_protocol_timeout,
@@ -487,9 +488,7 @@ impl Config {
             .push_make_ready()
             .push_timeout(dispatch_timeout)
             .push(router::Layer::new(LogicalPerRequest::from))
-            .check_new_service::<listen::Addrs>()
-            // Used by tap.
-            .push_http_insert_target()
+            .check_new_service::<TargetAddr>()
             .push_on_response(
                 svc::layers()
                     .push(http_admit_request)
@@ -497,10 +496,8 @@ impl Config {
                     .box_http_request()
                     .box_http_response(),
             )
-            .instrument(
-                |addrs: &listen::Addrs| info_span!("source", target.addr = %addrs.target_addr()),
-            )
-            .check_new_service::<listen::Addrs>()
+            .instrument(|_: &TargetAddr| info_span!("server"))
+            .check_new_service::<TargetAddr>()
             .into_inner()
             .into_make_service();
 
@@ -520,11 +517,26 @@ impl Config {
             drain.clone(),
         );
 
-        let accept = svc::stack(SkipDetect::new(skip_detect, http, tcp_forward))
+        let accept = svc::stack(SkipDetect::new(SkipPorts(skip_ports), http, tcp_forward))
+            .push(svc::layer::mk(|accept| {
+                strategy::Router::from_profiles(skip_ports, profiles, make)
+            }))
+            // On the outbound side, we'll never care about the peer addr.
+            .push_map_target(|addrs: listen::Addrs| addrs.target())
             .push(metrics.transport.layer_accept(TransportLabels));
 
         info!(addr = %listen_addr, "Serving");
         serve::serve(listen, accept, drain.signal()).await
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SkipPorts(std::sync::Arc<indexmap::IndexSet<u16>>);
+
+impl SkipTarget<TargetAddr> for SkipPorts {
+    fn skip_target(&self, target: &TargetAddr) -> bool {
+        let addr: std::net::SocketAddr = (*target).into();
+        self.0.contains(&addr.port())
     }
 }
 
