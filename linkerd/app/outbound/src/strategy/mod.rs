@@ -25,6 +25,16 @@ pub struct FromProfiles<P> {
     get_profiles: P,
 }
 
+#[derive(Clone, Debug)]
+pub struct Target {
+    pub addr: SocketAddr,
+
+    pub strategy: watch::Receiver<Strategy>,
+
+    // TODO this should be lazy if/when strategy resolution is its own API.
+    pub profile: profiles::Receiver,
+}
+
 impl<S, M> Router<S, M> {
     pub fn new(get_strategy: S, make_accept: M) -> Self {
         Self {
@@ -35,18 +45,26 @@ impl<S, M> Router<S, M> {
 }
 
 impl<P, M> Router<FromProfiles<P>, M> {
-    pub fn from_profiles(get_profiles: P, make_accept: M) -> Router<FromProfiles<P>, M> {
-        Router::new(FromProfiles::new(get_profiles), make_accept)
+    pub fn from_profiles(
+        opaque_ports: impl IntoIterator<Item = u16>,
+        get_profiles: P,
+        make_accept: M,
+    ) -> Self {
+        let profiles = FromProfiles {
+            get_profiles,
+            opaque_ports: Arc::new(opaque_ports.into_iter().collect()),
+        };
+        Router::new(profiles, make_accept)
     }
 }
 
 impl<T, S, M> Service<T> for Router<S, M>
 where
     T: Into<SocketAddr>,
-    S: Service<SocketAddr, Response = Receiver> + Clone + Send + 'static,
+    S: Service<SocketAddr, Response = Target> + Clone + Send + 'static,
     S::Error: Into<Error> + Send,
     S::Future: Send + 'static,
-    M: Service<Receiver> + Clone + Send + 'static,
+    M: Service<Target> + Clone + Send + 'static,
     M::Error: Into<Error> + Send,
     M::Future: Send + 'static,
 {
@@ -64,8 +82,8 @@ where
         let make = self.make_accept.clone();
 
         Box::pin(async move {
-            let strategy = get_strategy.await?;
-            make.oneshot(strategy).err_into::<Error>().await
+            let target = get_strategy.await?;
+            make.oneshot(target).err_into::<Error>().await
         })
     }
 }
@@ -76,9 +94,9 @@ where
     P::Error: Into<Error> + Send,
     P::Future: Send + 'static,
 {
-    type Response = Receiver;
+    type Response = Target;
     type Error = P::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Receiver, P::Error>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Target, P::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), P::Error>> {
         Poll::Ready(Ok(()))
@@ -90,20 +108,27 @@ where
 
         Box::pin(async move {
             if is_opaque {
-                let init = Strategy {
+                let (mut stx, strategy) = watch::channel(Strategy {
                     addr,
                     detect: Detect::Opaque,
                     logical: Logical::Concrete(Concrete::Forward(addr, Endpoint::default())),
-                };
-                let (mut tx, rx) = watch::channel(init.clone());
+                });
+                let (mut ptx, profile) = watch::channel(profiles::Routes::default());
                 // Hold the sender until all receivers have dropped.
-                tokio::spawn(async move { tx.closed().await });
-                return Ok(rx);
+                tokio::spawn(async move {
+                    futures::join!(stx.closed(), ptx.closed());
+                });
+                return Ok(Target {
+                    addr,
+                    profile,
+                    strategy,
+                });
             }
 
             let mut profile_rx = get_profiles.oneshot(addr).await?;
             let init = Strategy::from_profile(addr, profile_rx.borrow().clone());
             let (mut tx, rx) = watch::channel(init);
+            let profile = profile_rx.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
@@ -116,7 +141,12 @@ where
                     }
                 }
             });
-            Ok(rx)
+
+            Ok(Target {
+                addr,
+                profile,
+                strategy: rx,
+            })
         })
     }
 }
