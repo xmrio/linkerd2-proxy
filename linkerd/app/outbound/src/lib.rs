@@ -26,8 +26,7 @@ use linkerd2_app_core::{
     svc::{self, NewService},
     transport::{self, listen, tls},
     Conditional, DiscoveryRejected, Error, ProxyMetrics, StackMetrics, TraceContextLayer,
-    CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER, L5D_CLIENT_ID, L5D_REMOTE_IP, L5D_REQUIRE_ID,
-    L5D_SERVER_ID,
+    CANONICAL_DST_HEADER, DST_OVERRIDE_HEADER, L5D_REQUIRE_ID,
 };
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -35,10 +34,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, info_span};
 
-// #[allow(dead_code)] // TODO #2597
-// mod add_remote_ip_on_rsp;
-// #[allow(dead_code)] // TODO #2597
-// mod add_server_id_on_rsp;
 pub mod endpoint;
 mod orig_proto_upgrade;
 mod prevent_loop;
@@ -171,12 +166,7 @@ impl Config {
         // Checks the headers to validate that a client-specified required
         // identity matches the configured identity.
         let identity_headers = svc::layers()
-            .push_on_response(
-                svc::layers()
-                    .push(http::strip_header::response::layer(L5D_REMOTE_IP))
-                    .push(http::strip_header::response::layer(L5D_SERVER_ID))
-                    .push(http::strip_header::request::layer(L5D_REQUIRE_ID)),
-            )
+            .push_on_response(http::strip_header::request::layer(L5D_REQUIRE_ID))
             .push(MakeRequireIdentityLayer::new());
 
         svc::stack(tcp_connect)
@@ -265,11 +255,12 @@ impl Config {
         // This buffer controls how many discovery updates may be pending/unconsumed by the
         // balancer before backpressure is applied on the resolution stream. If the buffer is
         // full for `cache_max_idle_age`, then the resolution task fails.
-        let discover = {
-            const BUFFER_CAPACITY: usize = 1_000;
-            let resolve = map_endpoint::Resolve::new(endpoint::FromMetadata, resolve.clone());
-            discover::Layer::new(BUFFER_CAPACITY, cache_max_idle_age, resolve)
-        };
+        let discover = svc::layers()
+            .push(discover::resolve(map_endpoint::Resolve::new(
+                endpoint::FromMetadata,
+                resolve.clone(),
+            )))
+            .push(discover::buffer(1_000, cache_max_idle_age));
 
         // Builds a balancer for each concrete destination.
         let http_balancer = svc::stack(http_endpoint.clone())
@@ -419,12 +410,8 @@ impl Config {
             )
             .check_service::<Logical<HttpEndpoint>>()
             .push(http::header_from_target::layer(CANONICAL_DST_HEADER))
-            .push_on_response(
-                // Strips headers that may be set by this proxy.
-                svc::layers()
-                    .push(http::strip_header::request::layer(L5D_CLIENT_ID))
-                    .push(http::strip_header::request::layer(DST_OVERRIDE_HEADER)),
-            )
+            // Strips headers that may be set by this proxy.
+            .push_on_response(http::strip_header::request::layer(DST_OVERRIDE_HEADER))
             .check_make_service_clone::<Logical<HttpEndpoint>, http::Request<B>>()
             .instrument(|logical: &Logical<_>| info_span!("logical", addr = %logical.addr))
             .into_inner()
