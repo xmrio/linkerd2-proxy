@@ -518,8 +518,11 @@ impl Config {
         );
 
         let accept = svc::stack(SkipDetect::new(SkipPorts(skip_ports), http, tcp_forward))
+            .push(svc::layer::mk(|accept| {
+                strategy::Router::from_profiles(skip_ports, profiles, make)
+            }))
             // On the outbound side, we'll never care about the peer addr.
-            .push_map_target(|addrs: listen::Addrs| TargetAddr::from(addrs.target()))
+            .push_map_target(|addrs: listen::Addrs| addrs.target())
             .push(metrics.transport.layer_accept(TransportLabels));
 
         info!(addr = %listen_addr, "Serving");

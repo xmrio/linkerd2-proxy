@@ -30,19 +30,21 @@ pub enum Detect {
 
 #[derive(Clone, Debug)]
 pub enum Logical {
-    Concrete(Concrete),
+    Concrete(Concrete<R>),
     Split(Arc<Split>),
     //Fallback(Arc<Fallback>),
 }
 
 #[derive(Clone, Debug)]
-pub enum Concrete {
+pub enum Concrete<R> {
     Forward(SocketAddr, Endpoint),
-    Balance(Addr, Balancer),
+    Balance(Addr, Balancer<R>),
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Balancer {
+pub struct Balancer<R> {
+    pub resolution: R,
+
     // Peak-EWMA settings, if applicable.
     pub peak_ewma_decay: Duration,
     pub peak_ewma_default_rtt: Duration,
