@@ -33,17 +33,21 @@ impl<S: AsyncRead> AsyncRead for PrefixedIo<S> {
         // Check the length only once, since looking as the length
         // of a Bytes isn't as cheap as the length of a &[u8].
         let peeked_len = this.prefix.len();
-
+        let span = tracing::trace_span!("PrefixedIo::poll_read", prefix.len = peeked_len);
+        let _e = span.enter();
         if peeked_len == 0 {
+            tracing::trace!("polling io...");
             this.io.poll_read(cx, buf)
         } else {
             let len = cmp::min(buf.len(), peeked_len);
             buf[..len].copy_from_slice(&this.prefix.as_ref()[..len]);
             this.prefix.advance(len);
+            tracing::trace!(advanced_to = len);
             // If we've finally emptied the prefix, drop it so we don't
             // hold onto the allocated memory any longer. We won't peek
             // again.
             if peeked_len == len {
+                tracing::trace!("prefix exhausted");
                 *this.prefix = Bytes::new();
             }
             Poll::Ready(Ok(len))

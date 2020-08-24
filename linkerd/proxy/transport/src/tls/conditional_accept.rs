@@ -29,6 +29,8 @@ pub fn match_client_hello(input: &[u8], identity: &identity::Name) -> Match {
         input.skip_to_end(); // Ignore anything after what we parsed.
         r
     });
+    let span = tracing::trace_span!("match_client_hello", input.len = input.len(), ?identity);
+    let _e = span.enter();
     match r {
         Ok(Some(sni)) => {
             let m = identity::Name::from_hostname(sni.as_slice_less_safe())
@@ -40,18 +42,15 @@ pub fn match_client_hello(input: &[u8], identity: &identity::Name) -> Match {
                     }
                 })
                 .unwrap_or(Match::NotMatched);
-            trace!(
-                "match_client_hello: parsed correctly up to SNI; matches: {:?}",
-                m
-            );
+            trace!(matches = ?m, "parsed correctly up to SNI");
             m
         }
         Ok(None) => {
-            trace!("match_client_hello: failed to parse up to SNI");
+            trace!("failed to parse up to SNI");
             Match::NotMatched
         }
         Err(untrusted::EndOfInput) => {
-            trace!("match_client_hello: needs more input");
+            trace!("needs more input");
             Match::Incomplete
         }
     }

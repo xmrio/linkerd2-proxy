@@ -47,12 +47,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Peek<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut();
-        futures::ready!(this
+        let len = futures::ready!(this
             .0
             .as_mut()
             .expect("polled after complete")
             .poll_peek(cx))?;
         let Inner { buf, io } = this.0.take().expect("polled after complete");
+        tracing::trace!(peeked.len = len);
         Poll::Ready(Ok(PrefixedIo::new(buf.freeze(), io)))
     }
 }
@@ -64,6 +65,8 @@ impl<T: AsyncRead + Unpin> Inner<T> {
         if self.buf.capacity() == 0 {
             return Poll::Ready(Ok(self.buf.len()));
         }
-        Pin::new(&mut self.io).poll_read_buf(cx, &mut self.buf)
+        let res = Pin::new(&mut self.io).poll_read_buf(cx, &mut self.buf);
+        tracing::trace!(poll_peek = ?res);
+        res
     }
 }
