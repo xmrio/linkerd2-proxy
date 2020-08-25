@@ -58,10 +58,16 @@ where
     }
 
     fn call(&mut self, src_io: I) -> Self::Future {
+        use linkerd2_io::Instrumented;
         let connect = self.connect.call(self.target.clone()).err_into::<Error>();
         Box::pin(async move {
             let dst_io = connect.await?;
-            Duplex::new(src_io, dst_io).err_into::<Error>().await
+            Duplex::new(
+                Instrumented::new(src_io, tracing::trace_span!("src")),
+                Instrumented::new(dst_io, tracing::trace_span!("dst")),
+            )
+            .err_into::<Error>()
+            .await
         })
     }
 }

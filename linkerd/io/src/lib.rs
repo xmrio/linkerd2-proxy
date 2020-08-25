@@ -1,10 +1,12 @@
 mod boxed;
+mod instrumented;
 mod peek;
 mod prefixed;
 mod sensor;
 
 pub use self::{
     boxed::BoxedIo,
+    instrumented::Instrumented,
     peek::{Peek, Peekable},
     prefixed::PrefixedIo,
     sensor::{Sensor, SensorIo},

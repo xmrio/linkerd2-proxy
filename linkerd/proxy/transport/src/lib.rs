@@ -5,6 +5,7 @@ use tokio::net::TcpStream;
 
 pub mod connect;
 pub use linkerd2_io as io;
+pub mod instrument;
 pub mod listen;
 pub mod metrics;
 pub mod tls;
