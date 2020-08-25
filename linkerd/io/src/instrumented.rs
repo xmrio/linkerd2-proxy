@@ -1,4 +1,4 @@
-use super::Poll;
+use super::{internal, Poll};
 use bytes::{Buf, BufMut};
 use pin_project::pin_project;
 use std::mem::MaybeUninit;
@@ -79,6 +79,36 @@ impl<T: AsyncWrite> AsyncWrite for Instrumented<T> {
         let _e = this.span.enter();
         let result = this.io.poll_write_buf(cx, buf);
         tracing::trace!(poll_write_buf = ?result);
+        result
+    }
+}
+
+impl<T: internal::Io> internal::Io for Instrumented<T> {
+    /// This method is to allow using `Async::polL_read_buf` even through a
+    /// trait object.
+    fn poll_read_buf_erased(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut dyn BufMut,
+    ) -> Poll<usize> {
+        let this = self.project();
+        let _e = this.span.enter();
+        let result = this.io.poll_read_buf_erased(cx, buf);
+        tracing::trace!(poll_read_buf_erased = ?result);
+        result
+    }
+
+    /// This method is to allow using `Async::poll_write_buf` even through a
+    /// trait object.
+    fn poll_write_buf_erased(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut dyn Buf,
+    ) -> Poll<usize> {
+        let this = self.project();
+        let _e = this.span.enter();
+        let result = this.io.poll_write_buf_erased(cx, buf);
+        tracing::trace!(poll_write_buf_erased = ?result);
         result
     }
 }

@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
+use tracing_futures::Instrument;
 
 #[derive(Clone, Debug)]
 pub struct Forward<C> {
@@ -61,7 +62,7 @@ where
         use linkerd2_io::Instrumented;
         let connect = self.connect.call(self.target.clone()).err_into::<Error>();
         Box::pin(async move {
-            let dst_io = connect.await?;
+            let dst_io = connect.instrument(tracing::trace_span!("connect")).await?;
             Duplex::new(
                 Instrumented::new(src_io, tracing::trace_span!("src")),
                 Instrumented::new(dst_io, tracing::trace_span!("dst")),

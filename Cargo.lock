@@ -1359,9 +1359,12 @@ dependencies = [
  "futures 0.3.5",
  "linkerd2-duplex",
  "linkerd2-error",
+ "linkerd2-io",
  "pin-project",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]
